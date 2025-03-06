@@ -1,0 +1,22 @@
+{
+  "name": "koishi-plugin-onebot-manager",
+  "description": "基于 onebot 的 QQ 群管插件，功能丰富，高度可自定义",
+  "version": "0.0.1",
+  "main": "lib/index.js",
+  "typings": "lib/index.d.ts",
+  "files": [
+    "lib",
+    "dist"
+  ],
+  "license": "MIT",
+  "scripts": {},
+  "keywords": [
+    "chatbot",
+    "koishi",
+    "plugin"
+  ],
+  "devDependencies": {},
+  "peerDependencies": {
+    "koishi": "^4.18.7"
+  }
+}
