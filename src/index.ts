@@ -94,9 +94,7 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
   const recallTasks = new Map<string, Set<RecallTask>>()
 
   const handleMessage = async (session) => {
-    if (!session?.messageId) return
-
-    await ctx.database.create('onebot_messages', {
+    session?.messageId && await ctx.database.create('onebot_messages', {
       messageId: session.messageId,
       userId: session.userId,
       channelId: session.channelId,
@@ -113,23 +111,21 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
     .option('user', '-u <user> 撤回指定用户的消息')
     .action(async ({ session, options }, messageCount = 1) => {
       try {
-        // 处理引用消息撤回
         if (session.quote) {
-          session.quote.id && await session.bot.deleteMessage(session.channelId, session.quote.id)
-          await ctx.database.remove('onebot_messages', { messageId: session.quote.id })
+          const quoteId = Array.isArray(session.quote)
+            ? session.quote[0]?.id
+            : (session.quote.id || session.quote.messageId)
+
+          if (!quoteId) return '无法识别引用消息'
+
+          await session.bot.deleteMessage(session.channelId, quoteId)
+          await ctx.database.remove('onebot_messages', { messageId: quoteId })
           return '已撤回引用消息'
         }
 
         const channelTasks = recallTasks.get(session.channelId) || new Set()
         const controller = new AbortController()
         const targetUserId = options.user?.match(/<at:(.+)>/)?.[1] || options.user
-
-        const task: RecallTask = {
-          controller,
-          total: 0,
-          success: 0,
-          failed: 0,
-        }
 
         const messagesToRecall = await ctx.database
           .select('onebot_messages')
@@ -143,21 +139,24 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
 
         if (!messagesToRecall.length) return '没有可撤回的消息'
 
-        task.total = messagesToRecall.length
+        const task: RecallTask = {
+          controller,
+          total: messagesToRecall.length,
+          success: 0,
+          failed: 0,
+        }
+
         channelTasks.add(task)
         recallTasks.set(session.channelId, channelTasks)
 
-        for (const [index, message] of messagesToRecall.entries()) {
+        for (const message of messagesToRecall) {
           if (controller.signal.aborted) break
 
           try {
-            await session.bot.deleteMessage(message.channelId, message.messageId)
+            message.messageId && await session.bot.deleteMessage(message.channelId, message.messageId)
             await ctx.database.remove('onebot_messages', { messageId: message.messageId })
             task.success++
-
-            if (index < messagesToRecall.length - 1) {
-              await new Promise(resolve => setTimeout(resolve, 500))
-            }
+            await new Promise(resolve => setTimeout(resolve, 500))
           } catch (error) {
             task.failed++
             logger.warn(`撤回消息失败: ${message.messageId}: ${error.message}`)
@@ -165,14 +164,11 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
         }
 
         channelTasks.delete(task)
-        if (channelTasks.size === 0) {
-          recallTasks.delete(session.channelId)
-        }
+        channelTasks.size === 0 && recallTasks.delete(session.channelId)
 
-        if (task.total > 1) {
-          return `撤回完成: 成功${task.success}条${task.failed ? `，失败${task.failed}条` : ''}`
-        }
-        return '撤回成功'
+        return task.total > 1
+          ? `撤回完成: 成功${task.success}条${task.failed ? `，失败${task.failed}条` : ''}`
+          : '撤回成功'
       } catch (error) {
         logger.error(`撤回操作失败: ${error.message}`)
         return '撤回操作失败'
