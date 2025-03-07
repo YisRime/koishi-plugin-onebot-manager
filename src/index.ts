@@ -1,4 +1,5 @@
-import { Context, Schema } from 'koishi'
+import { Context, h, Schema } from 'koishi'
+import { inspect } from 'util'
 
 export const name = 'onebot-manager'
 export const inject = { required: ['database'] }
@@ -41,7 +42,6 @@ interface RecallTask {
 
 export function apply(ctx: Context, config: MessageManagerConfig) {
   const logger = ctx.logger('onebot-manager')
-  const onebotContext = ctx.platform('onebot')
 
   ctx.model.extend('onebot_messages', {
     messageId: 'string',
@@ -55,9 +55,6 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
       ['timestamp'],
     ],
   })
-
-  const extractUserIdFromMention = (mentionText: string): string =>
-    mentionText?.match(/<at:(.+)>/)?.[1] || mentionText
 
   async function removeExpiredMessages(channelId: string, userId: string) {
     try {
@@ -97,44 +94,35 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
   const recallTasks = new Map<string, Set<RecallTask>>()
 
   const handleMessage = async (session) => {
-    try {
-      if (!session?.messageId) return
+    if (!session?.messageId) return
 
-      await ctx.database.create('onebot_messages', {
-        messageId: session.messageId,
-        userId: session.userId,
-        channelId: session.channelId,
-        timestamp: Date.now(),
-      })
+    await ctx.database.create('onebot_messages', {
+      messageId: session.messageId,
+      userId: session.userId,
+      channelId: session.channelId,
+      timestamp: Date.now(),
+    })
 
-      await removeExpiredMessages(session.channelId, session.userId)
-    } catch (error) {
-      logger.error(`Failed to handle message: ${error.message}`)
-    }
+    await removeExpiredMessages(session.channelId, session.userId)
   }
 
-  onebotContext.on('message', async (session) => {
-    await handleMessage(session)
-  })
+  ctx.on('message', handleMessage)
+  ctx.on('send', handleMessage)
 
-  onebotContext.on('send', async (session) => {
-    await handleMessage(session)
-  })
-
-  const recall = onebotContext
-    .command('recall [messageCount:number]', '撤回消息')
+  const recall = ctx.command('recall [messageCount:number]', '撤回消息')
     .option('user', '-u <user> 撤回指定用户的消息')
     .action(async ({ session, options }, messageCount = 1) => {
       try {
+        // 处理引用消息撤回
         if (session.quote) {
-          await session.bot.deleteMessage(session.channelId, session.quote.id)
+          session.quote.id && await session.bot.deleteMessage(session.channelId, session.quote.id)
           await ctx.database.remove('onebot_messages', { messageId: session.quote.id })
-          return
+          return '已撤回引用消息'
         }
 
         const channelTasks = recallTasks.get(session.channelId) || new Set()
         const controller = new AbortController()
-        const targetUserId = extractUserIdFromMention(options.user)
+        const targetUserId = options.user?.match(/<at:(.+)>/)?.[1] || options.user
 
         const task: RecallTask = {
           controller,
@@ -172,7 +160,7 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
             }
           } catch (error) {
             task.failed++
-            logger.warn(`Failed to recall message ${message.messageId}: ${error.message}`)
+            logger.warn(`撤回消息失败: ${message.messageId}: ${error.message}`)
           }
         }
 
@@ -184,9 +172,9 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
         if (task.total > 1) {
           return `撤回完成: 成功${task.success}条${task.failed ? `，失败${task.failed}条` : ''}`
         }
-        return
+        return '撤回成功'
       } catch (error) {
-        logger.error(`Recall operation failed: ${error.message}`)
+        logger.error(`撤回操作失败: ${error.message}`)
         return '撤回操作失败'
       }
     })
@@ -203,7 +191,28 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
       return `已停止${channelTasks.size}个撤回操作`
     })
 
-  recall.subcommand('.msgid', '获取消息ID')
+  const ins = ctx.command('inspect')
+
+  ins.subcommand('elements', '检查消息元素')
+    .action(({ session }) => {
+      let { elements, quote } = session
+      if (quote) elements = quote.elements
+      const jsons = []
+      elements = elements.map((element) => {
+        if (element.type === 'json') {
+          jsons.push(JSON.parse(element.attrs.data))
+          element.attrs.data = `[JSON ${jsons.length}]`
+        }
+        return element
+      })
+      let result = inspect(elements, { depth: Infinity })
+      if (jsons.length) {
+        result += '\n\n' + jsons.map((data, index) => `[JSON ${index + 1}]: ${inspect(data, { depth: Infinity })}`).join('\n\n')
+      }
+      return h.text(result)
+    })
+
+  ins.subcommand('msgid', '获取消息ID')
     .action(async ({ session }) => {
       if (session.quote) {
         return session.quote.id
