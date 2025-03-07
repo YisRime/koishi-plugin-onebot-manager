@@ -40,6 +40,7 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
     channelId: 'string',
     timestamp: 'integer',
   }, {
+    primary: 'messageId',
     indexes: [
       ['channelId', 'userId'],
       ['timestamp'],
