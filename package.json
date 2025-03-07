@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-onebot-manager",
   "description": "基于 onebot 的 QQ 群管插件，功能丰富，高度可自定义",
-  "version": "0.0.10",
+  "version": "0.0.11",
   "contributors": [
     "Yis_Rime <yis_rime@outlook.com>"
   ],

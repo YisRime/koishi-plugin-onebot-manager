@@ -57,130 +57,115 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
   })
 
   async function removeExpiredMessages(channelId: string, userId: string) {
-    try {
-      const tasks = []
-      const now = Date.now()
+    const tasks = []
+    const now = Date.now()
 
-      if (config.maxMessageRetentionHours > 0) {
-        const expirationTimestamp = now - config.maxMessageRetentionHours * 3600000
-        tasks.push(ctx.database.remove('onebot_messages', {
-          channelId,
-          timestamp: { $lt: expirationTimestamp }
-        }))
-      }
+    config.maxMessageRetentionHours > 0 && tasks.push(
+      ctx.database.remove('onebot_messages', {
+        channelId,
+        timestamp: { $lt: now - config.maxMessageRetentionHours * 3600000 }
+      })
+    )
 
-      if (config.maxMessagesPerUser > 0) {
-        const userMessageHistory = await ctx.database
-          .select('onebot_messages')
-          .where({ channelId, userId })
-          .orderBy('timestamp', 'desc')
-          .limit(config.maxMessagesPerUser + 1)
-          .execute()
+    if (config.maxMessagesPerUser > 0) {
+      const messages = await ctx.database
+        .select('onebot_messages')
+        .where({ channelId, userId })
+        .orderBy('timestamp', 'desc')
+        .limit(config.maxMessagesPerUser + 1)
+        .execute()
 
-        if (userMessageHistory.length > config.maxMessagesPerUser) {
-          const messagesToRemove = userMessageHistory.slice(config.maxMessagesPerUser)
-          tasks.push(ctx.database.remove('onebot_messages', {
-            messageId: { $in: messagesToRemove.map(msg => msg.messageId) }
-          }))
-        }
-      }
-
-      await Promise.all(tasks)
-    } catch (error) {
-      logger.error(`Failed to remove expired messages: ${error.message}`)
+      messages.length > config.maxMessagesPerUser && tasks.push(
+        ctx.database.remove('onebot_messages', {
+          messageId: { $in: messages.slice(config.maxMessagesPerUser).map(msg => msg.messageId) }
+        })
+      )
     }
+
+    await Promise.all(tasks).catch(error =>
+      logger.error(`Failed to remove expired messages: ${error.message}`))
   }
 
   const recallTasks = new Map<string, Set<RecallTask>>()
 
   const handleMessage = async (session) => {
-    session?.messageId && await ctx.database.create('onebot_messages', {
+    if (!session?.messageId) return
+    await ctx.database.create('onebot_messages', {
       messageId: session.messageId,
       userId: session.userId,
       channelId: session.channelId,
       timestamp: Date.now(),
-    })
-
-    await removeExpiredMessages(session.channelId, session.userId)
+    }).then(() => removeExpiredMessages(session.channelId, session.userId))
   }
 
   ctx.on('message', handleMessage)
   ctx.on('send', handleMessage)
 
-  const recall = ctx.command('recall [messageCount:number]', '撤回消息')
+  async function recallMessages(session, messageIds: string[]) {
+    return Promise.allSettled(messageIds.map(async id => {
+      await session.bot.deleteMessage(session.channelId, id)
+      await ctx.database.remove('onebot_messages', { messageId: id })
+    }))
+  }
+
+  async function fetchMessagesToRecall(channelId: string, options: { user?: string, count?: number }) {
+    return ctx.database
+      .select('onebot_messages')
+      .where({
+        channelId,
+        ...(options.user && { userId: options.user.match(/<at:(.+)>/)?.[1] || options.user })
+      })
+      .orderBy('timestamp', 'desc')
+      .limit(Math.max(1, parseInt(options.count?.toString()) || 1))
+      .execute()
+  }
+
+  const recall = ctx.command('recall', '撤回消息')
     .option('user', '-u <user> 撤回指定用户的消息')
-    .action(async ({ session, options }, messageCount = 1) => {
+    .option('number', '-n <number> 撤回消息数量', { fallback: 1 })
+    .action(async ({ session, options }) => {
       try {
         const quotes = Array.isArray(session.quote) ? session.quote : [session.quote].filter(Boolean)
         if (quotes?.length) {
-          const results = await Promise.allSettled(quotes.map(async quote => {
-            const quoteId = quote.id || quote.messageId
-            if (!quoteId) throw new Error('无法识别引用消息')
-            await session.bot.deleteMessage(session.channelId, quoteId)
-            await ctx.database.remove('onebot_messages', { messageId: quoteId })
-          }))
-
-          const successful = results.filter(r => r.status === 'fulfilled').length
+          const results = await recallMessages(session, quotes.map(q => q.id || q.messageId))
           const failed = results.filter(r => r.status === 'rejected').length
-
-          return quotes.length === 1
-            ? '已撤回引用消息'
-            : `撤回完成: 成功${successful}条${failed ? `，失败${failed}条` : ''}`
+          return failed ? `撤回失败: ${failed}条` : ''
         }
 
         const channelTasks = recallTasks.get(session.channelId) || new Set()
-        const controller = new AbortController()
-        const targetUserId = options.user?.match(/<at:(.+)>/)?.[1] || options.user
-
-        const messagesToRecall = await ctx.database
-          .select('onebot_messages')
-          .where({
-            channelId: session.channelId,
-            ...(targetUserId && { userId: targetUserId })
-          })
-          .orderBy('timestamp', 'desc')
-          .limit(Number(messageCount))
-          .execute()
-
-        if (!messagesToRecall.length) return '没有可撤回的消息'
-
         const task: RecallTask = {
-          controller,
-          total: messagesToRecall.length,
+          controller: new AbortController(),
+          total: 0,
           success: 0,
-          failed: 0,
+          failed: 0
         }
 
         channelTasks.add(task)
         recallTasks.set(session.channelId, channelTasks)
 
-        for (const message of messagesToRecall) {
-          if (controller.signal.aborted) break
+        const messages = await fetchMessagesToRecall(session.channelId, {
+          user: options.user,
+          count: options.number
+        })
 
-          try {
-            message.messageId && await session.bot.deleteMessage(message.channelId, message.messageId)
-            await ctx.database.remove('onebot_messages', { messageId: message.messageId })
-            task.success++
-            await new Promise(resolve => setTimeout(resolve, 500))
-          } catch (error) {
-            task.failed++
-            logger.warn(`撤回消息失败: ${message.messageId}: ${error.message}`)
-          }
+        task.total = messages.length
+        for (const msg of messages) {
+          if (task.controller.signal.aborted) break
+          await recallMessages(session, [msg.messageId])
+            .then(([result]) => result.status === 'fulfilled' ? task.success++ : task.failed++)
+          await new Promise(resolve => setTimeout(resolve, 500))
         }
 
         channelTasks.delete(task)
-        channelTasks.size === 0 && recallTasks.delete(session.channelId)
+        !channelTasks.size && recallTasks.delete(session.channelId)
 
-        return task.total > 1
-          ? `撤回完成: 成功${task.success}条${task.failed ? `，失败${task.failed}条` : ''}`
-          : '撤回成功'
+        return task.failed ? `撤回失败: ${task.failed}条` : ''
       } catch (error) {
-        logger.error(`撤回操作失败: ${error.message}`)
-        return '撤回操作失败'
+        return '撤回失败'
       }
     })
 
-  recall.subcommand('.stop', '停止所有撤回操作')
+  recall.subcommand('.stop', '停止撤回操作')
     .action(async ({ session }) => {
       const channelTasks = recallTasks.get(session.channelId)
 
