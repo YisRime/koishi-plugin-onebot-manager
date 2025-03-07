@@ -111,7 +111,7 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
     return result
   })
 
-  const cmd = onebotContext
+  const recall = onebotContext
     .command('recall [messageCount:number]', '撤回消息')
     .option('user', '-u <user> 撤回指定用户的消息')
     .action(async ({ session, options }, messageCount = 1) => {
@@ -122,7 +122,7 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
           return
         } catch (error) {
           ctx.logger(error.message)
-          return
+          return '撤回失败1条'
         }
       }
 
@@ -180,10 +180,13 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
         recallTasks.delete(session.channelId)
       }
 
-      return `撤回成功${task.success}条${task.failed ? `，失败${task.failed}条` : ''}`
+      if (task.total > 1 && task.success > 0) {
+        return `撤回成功${task.success}条${task.failed ? `，失败${task.failed}条` : ''}`
+      }
+      return
     })
 
-  cmd.subcommand('.stop', '停止所有撤回操作')
+  recall.subcommand('.stop', '停止所有撤回操作')
     .action(async ({ session }) => {
       const channelTasks = recallTasks.get(session.channelId)
 
@@ -193,5 +196,11 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
 
       recallTasks.delete(session.channelId)
       return `已停止${channelTasks.size}个撤回操作`
+    })
+
+  recall.subcommand('.msgid [index:number]')
+    .action(async ({ session }) => {
+      const messageToQuery = session.quote?.id || session.messageId
+      return session.bot.sendMessage(session.channelId, messageToQuery, { quote: messageToQuery })
     })
 }
