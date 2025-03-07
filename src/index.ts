@@ -122,7 +122,7 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
           return
         } catch (error) {
           ctx.logger(error.message)
-          return '撤回失败1条'
+          return
         }
       }
 
@@ -180,7 +180,7 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
         recallTasks.delete(session.channelId)
       }
 
-      if (task.total > 1 && task.success > 0) {
+      if (task.total > 1) {
         return `撤回成功${task.success}条${task.failed ? `，失败${task.failed}条` : ''}`
       }
       return
@@ -198,9 +198,11 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
       return `已停止${channelTasks.size}个撤回操作`
     })
 
-  recall.subcommand('.msgid [index:number]')
+  recall.subcommand('.msgid', '获取消息ID')
     .action(async ({ session }) => {
-      const messageToQuery = session.quote?.id || session.messageId
-      return session.bot.sendMessage(session.channelId, messageToQuery, { quote: messageToQuery })
+      if (session.quote) {
+        return session.send(session.quote.id)
+      }
+      return session.send(session.messageId)
     })
 }
