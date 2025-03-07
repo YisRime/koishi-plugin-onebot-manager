@@ -111,16 +111,21 @@ export function apply(ctx: Context, config: MessageManagerConfig) {
     .option('user', '-u <user> 撤回指定用户的消息')
     .action(async ({ session, options }, messageCount = 1) => {
       try {
-        if (session.quote) {
-          const quoteId = Array.isArray(session.quote)
-            ? session.quote[0]?.id
-            : (session.quote.id || session.quote.messageId)
+        const quotes = Array.isArray(session.quote) ? session.quote : [session.quote].filter(Boolean)
+        if (quotes?.length) {
+          const results = await Promise.allSettled(quotes.map(async quote => {
+            const quoteId = quote.id || quote.messageId
+            if (!quoteId) throw new Error('无法识别引用消息')
+            await session.bot.deleteMessage(session.channelId, quoteId)
+            await ctx.database.remove('onebot_messages', { messageId: quoteId })
+          }))
 
-          if (!quoteId) return '无法识别引用消息'
+          const successful = results.filter(r => r.status === 'fulfilled').length
+          const failed = results.filter(r => r.status === 'rejected').length
 
-          await session.bot.deleteMessage(session.channelId, quoteId)
-          await ctx.database.remove('onebot_messages', { messageId: quoteId })
-          return '已撤回引用消息'
+          return quotes.length === 1
+            ? '已撤回引用消息'
+            : `撤回完成: 成功${successful}条${failed ? `，失败${failed}条` : ''}`
         }
 
         const channelTasks = recallTasks.get(session.channelId) || new Set()
