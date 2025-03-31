@@ -1,6 +1,7 @@
-import { Context, Schema } from 'koishi'
+import { Context, Schema, h } from 'koishi'
 import {} from "koishi-plugin-adapter-onebot";
 import { OnebotRequest, RequestOption, TimeoutAction } from './request'
+import { utils } from './utils'
 
 export const name = 'onebot-manager'
 
@@ -55,4 +56,36 @@ export function apply(ctx: Context, config: Config = {}) {
   if (config.enable !== false) {
     request.registerEventListeners()
   }
+
+  // 设置群组专属头衔
+  ctx.command('tag [title:text] [target]', '设置群组专属头衔')
+    .action(async ({ session }, title = '', target) => {
+      let userId = session.userId
+      if (target) {
+        const parsedId = utils.parseTarget(target)
+        if (!parsedId) {
+          const message = await session.send('未找到该用户')
+          await utils.autoRecall(session, Array.isArray(message) ? message[0] : message)
+          return
+        }
+        userId = parsedId
+      }
+      try {
+        await session.onebot.setGroupSpecialTitle(
+          Number(session.guildId),
+          Number(userId),
+          title
+        );
+        const targetDesc = userId === session.userId ? '您' : `用户 ${userId}`
+        if (title) {
+          return `已将${targetDesc}的头衔设置为：${title}`;
+        } else {
+          return `已清除${targetDesc}的头衔`;
+        }
+      } catch (error) {
+        const message = await session.send(`设置头衔失败: ${error.message}`)
+        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message)
+        return
+      }
+    });
 }
