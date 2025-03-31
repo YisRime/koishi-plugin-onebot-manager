@@ -4,7 +4,7 @@ import {} from "koishi-plugin-adapter-onebot";
 // 声明OneBot请求事件类型
 declare module 'koishi' {
   interface Events {
-    'onebot/request'(session: Session & RequestEvent): void
+    'request'(session: Session & RequestEvent): void
   }
 }
 
@@ -205,7 +205,7 @@ export function apply(ctx: Context, config: Config = {}) {
   }
 
   // 注册OneBot请求事件监听
-  ctx.on('onebot/request', async session => {
+  ctx.on('request', async session => {
     // 设置必要的会话字段
     session.userId = session.user_id.toString()
 
