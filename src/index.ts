@@ -16,7 +16,7 @@ export interface Config {
 export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
     enable: Schema.boolean()
-      .description('是否启用监听').default(true),
+      .description('开启请求监听').default(true),
     requestOption: Schema.union([
       Schema.const('accept').description('同意'),
       Schema.const('reject').description('拒绝'),
