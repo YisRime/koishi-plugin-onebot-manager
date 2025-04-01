@@ -15,12 +15,6 @@ export interface NotifyTarget {
  * 用于处理好友申请、群邀请和入群请求
  */
 export class OnebotRequest {
-  private typeNames: Record<RequestType, string> = {
-    friend: '好友申请',
-    guild: '入群邀请',
-    member: '加群请求'
-  }
-
   constructor(
     private ctx: Context,
     private logger: Logger,
@@ -35,126 +29,122 @@ export class OnebotRequest {
    * @public
    */
   public async processRequest(session: Session, type: RequestType): Promise<void> {
-    const { requestOption = 'accept', timeout = 0, timeoutAction = 'reject', enableNotify = false, notifyTarget = '' } = this.config
+    const { requestOption = 'accept', enableNotify = false, notifyTarget = '' } = this.config
     let notified = false;
-    // 发送通知
     if (enableNotify && notifyTarget) {
-      try {
-        const [targetType, targetId] = notifyTarget.split(':');
-        if (!targetType || !targetId) {
-          this.logger.warn(`通知目标错误: ${notifyTarget}`);
+      const [targetType, targetId] = notifyTarget.split(':');
+      if (!targetType || !targetId) {
+        this.logger.warn(`通知目标错误: ${notifyTarget}`);
+      } else {
+        const normalizedType = targetType.toLowerCase();
+        if (normalizedType !== 'group' && normalizedType !== 'private') {
+          this.logger.warn(`通知类型错误: ${targetType}`);
         } else {
-          const normalizedType = targetType.toLowerCase();
-          if (normalizedType === 'group' || normalizedType === 'private') {
-            let info;
-            if (type === 'friend') {
-              const user = await session.bot.getUser?.(session.userId).catch(() => null);
-              info = {
-                nickname: user?.name || user?.nickname || user?.username || '未知用户',
-                avatar: user?.avatar || '',
-                id: session.userId,
-                comment: session.event?._data?.comment || ''
-              };
-            } else {
-              const [guild, user] = await Promise.all([
-                session.bot.getGuild?.(session.guildId).catch(() => null),
-                session.bot.getUser?.(session.userId).catch(() => null)
-              ]);
-              info = {
-                nickname: guild?.name || '未知群组',
-                avatar: guild?.avatar || '',
-                id: session.guildId,
-                inviter: user?.name || user?.nickname || user?.username || '未知用户',
-                inviterId: session.userId
-              };
-            }
-            if (info) {
-              let message = `收到来自${info.nickname}[${info.id}]的${this.typeNames[type]}：\n`;
-              if (info.avatar) message += `<image url="${info.avatar}"/>\n`;
-              if (type === 'friend') {
-                if (info.comment) message += `验证信息：${info.comment}\n`;
-              } else if ('inviter' in info) {
-                message += `${info.inviter}[${info.inviterId}]\n`;
-              }
-              if (normalizedType === 'group') {
-                await session.bot.sendMessage(targetId, message);
-              } else {
-                await session.bot.sendPrivateMessage(targetId, message);
-              }
+          try {
+            const message = await this.createNotificationMessage(session, type);
+            if (message) {
+              normalizedType === 'group'
+                ? await session.bot.sendMessage(targetId, message)
+                : await session.bot.sendPrivateMessage(targetId, message).then(() =>
+                    session.bot.sendPrivateMessage(targetId, `请回复 y/n [备注/理由] 来处理申请`));
+              // 创建响应监听器
+              const disposer = this.ctx.middleware(async (session2, next) => {
+                const isRelevant = normalizedType === 'group'
+                  ? session2.channelId === targetId && !session2.content.startsWith('.')
+                  : session2.userId === targetId && session2.channelId.startsWith('private:');
+                if (!isRelevant) return next();
+                const content = session2.content.trim();
+                const lowerContent = content.toLowerCase();
+                // 检查是否为有效响应
+                const isApprove = lowerContent === 'y' || lowerContent.startsWith('y ');
+                const isReject = lowerContent === 'n' || lowerContent.startsWith('n ');
+                if (!isApprove && !isReject) return next();
+                // 处理响应
+                disposer();
+                if (isApprove) {
+                  if (type === 'friend' && lowerContent.startsWith('y ')) {
+                    const remark = content.slice(2).trim();
+                    await this.processRequestAction(session, type, true, '', remark);
+                  } else {
+                    await this.processRequestAction(session, type, true);
+                  }
+                }
+                else {
+                  const reason = content.startsWith('n ') ? content.slice(2).trim() : '';
+                  await this.processRequestAction(session, type, false, reason);
+                }
+                if (normalizedType === 'private') {
+                  await session.bot.sendPrivateMessage(targetId, isApprove ? '已通过' : '已拒绝');
+                }
+                return next();
+              });
               notified = true;
             }
-          } else {
-            this.logger.warn(`通知类型错误: ${targetType}`);
+          } catch (error) {
+            this.logger.error(`通知发送失败: ${error}`);
           }
         }
-      } catch (error) {
-        this.logger.error(`通知处理失败: ${error}`);
       }
     }
-    // 处理请求动作
-    const processRequestAction = async (approve: boolean, reason = '', remark = ''): Promise<boolean> => {
-      try {
-        const flag = session.event._data.flag;
-        if (type === 'friend') {
-          await session.onebot.setFriendAddRequest(flag, approve, remark);
-        } else {
-          const subType = session.event._data.sub_type || 'add';
-          await session.onebot.setGroupAddRequest(flag, subType, approve, approve ? '' : reason);
-        }
-        return true;
-      } catch (error) {
-        this.logger.error(`处理失败: ${error}`);
-        return false;
+    if (!notified) {
+      if (requestOption !== 'manual') {
+        await this.processRequestAction(session, type, requestOption === 'accept');
+      } else if (enableNotify) {
+        await this.processRequestAction(session, type, false, '内部错误，自动拒绝，请重试');
       }
-    };
-    // 自动处理请求
-    if (requestOption !== 'manual') {
-      await processRequestAction(requestOption === 'accept');
-      return;
     }
-    // 手动处理
-    if (notified) {
-      try {
-        // 发送提示文本
-        const helpText = `请回复 y/n [备注/理由] 来处理此项申请`;
-        await session.send(helpText);
-        // 等待用户响应
-        const response = await session.prompt(timeout ? timeout * 60 * 1000 : undefined);
-        if (!response) {
-          const approve = timeoutAction === 'accept';
-          await processRequestAction(approve);
-          await session.send(`超时${approve ? '已通过' : '已拒绝'}`);
-          return;
-        }
-        // 处理响应
-        const content = response.trim();
-        const lowerContent = content.toLowerCase();
-        let result: boolean, replyMessage: string;
-        if (lowerContent === 'y' || lowerContent === 'yes') {
-          result = await processRequestAction(true);
-          replyMessage = `已通过`;
-        } else if (type === 'friend' && lowerContent.startsWith('y ')) {
-          const remark = content.slice(2).trim();
-          result = await processRequestAction(true, '', remark);
-          replyMessage = `已通过，备注：${remark}`;
-        } else if (lowerContent === 'n' || lowerContent.startsWith('n ')) {
-          const reason = content.length > 1 ? content.slice(2).trim() : '';
-          result = await processRequestAction(false, reason);
-          replyMessage = `已拒绝${reason ? `，理由：${reason}` : ''}`;
-        } else {
-          await session.send('格式错误');
-          return await this.processRequest(session, type);
-        }
-        if (result) {
-          await session.send(replyMessage);
-        }
-      } catch (e) {
-        this.logger.warn(`处理失败: ${e}`);
-        await processRequestAction(timeoutAction === 'accept');
+  }
+
+  /**
+   * 创建通知消息
+   * @param session 会话对象
+   * @param type 请求类型
+   * @returns 通知消息
+   */
+  private async createNotificationMessage(session: Session, type: RequestType): Promise<string> {
+    let message = '';
+    const user = await session.bot.getUser?.(session.userId)?.catch(() => null) ?? null;
+    const userName = user?.name ?? '未知用户';
+    switch (type) {
+      case 'friend': {
+        const avatar = user?.avatar ?? '';
+        const comment = session.event?._data?.comment ?? '';
+        message = `收到来自${userName}[${session.userId}]的好友申请：\n`;
+        if (avatar) message += `<image url="${avatar}"/>\n`;
+        if (comment) message += `验证信息：${comment}\n`;
+        break;
       }
-    } else if (enableNotify) {
-      this.logger.warn(`无法发送通知，执行默认操作`);
-      await processRequestAction(timeoutAction === 'accept');
+      case 'guild':
+      case 'member': {
+        const guild = await session.bot.getGuild?.(session.guildId)?.catch(() => null) ?? null;
+        const guildName = guild?.name ?? '未知群组';
+        message = type === 'guild'
+          ? `收到入群邀请：\n群组：${guildName}[${session.guildId}]\n邀请人：${userName}[${session.userId}]\n邀请类型：${
+              session.event?._data?.sub_type === 'invite' ? '邀请机器人入群' : '被邀请入群'}\n`
+          : `收到加群请求：\n群组：${guildName}[${session.guildId}]\n申请人：${userName}[${session.userId}]\n${
+              session.event?._data?.comment ? `验证信息：${session.event?._data?.comment}\n` : ''}`;
+        break;
+      }
+    }
+    return message;
+  }
+
+  /**
+   * 处理请求动作
+   */
+  private async processRequestAction(session: Session, type: RequestType, approve: boolean, reason = '', remark = ''): Promise<boolean> {
+    try {
+      const flag = session.event._data.flag;
+      if (type === 'friend') {
+        await session.onebot.setFriendAddRequest(flag, approve, remark);
+      } else {
+        const subType = session.event._data.sub_type ?? 'add';
+        await session.onebot.setGroupAddRequest(flag, subType, approve, approve ? '' : reason);
+      }
+      return true;
+    } catch (error) {
+      this.logger.error(`请求处理失败: ${error}`);
+      return false;
     }
   }
 
@@ -163,13 +153,9 @@ export class OnebotRequest {
    */
   public registerEventListeners() {
     const handleEvent = (type: RequestType) => async (session: Session) => {
-      const userId = session.event._data.user_id?.toString();
-      session.userId = userId;
+      session.userId = session.event._data.user_id?.toString();
       if (type !== 'friend') {
-        const groupId = session.event._data.group_id;
-        if (groupId) {
-          session.guildId = groupId.toString();
-        }
+        session.guildId = session.event._data.group_id?.toString() || '';
       }
       await this.processRequest(session, type);
     };

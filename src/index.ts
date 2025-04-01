@@ -1,6 +1,6 @@
-import { Context, Schema, h } from 'koishi'
+import { Context, Schema } from 'koishi'
 import {} from "koishi-plugin-adapter-onebot";
-import { OnebotRequest, RequestOption, TimeoutAction } from './request'
+import { OnebotRequest, RequestOption } from './request'
 import { utils } from './utils'
 
 export const name = 'onebot-manager'
@@ -10,8 +10,6 @@ export interface Config {
   enableNotify?: boolean
   notifyTarget?: string
   requestOption?: RequestOption
-  timeout?: number
-  timeoutAction?: TimeoutAction
 }
 
 // 配置模式
@@ -31,20 +29,7 @@ export const Config: Schema<Config> = Schema.intersect([
     Schema.object({
       enableNotify: Schema.const(true).required(),
       notifyTarget: Schema.string()
-        .description('通知目标(group/private:12345)')
-        .default(''),
-    }),
-  ]),
-  Schema.union([
-    Schema.object({
-      enableNotify: Schema.const(true).required(),
-      requestOption: Schema.const('manual').required(),
-      timeout: Schema.number()
-        .description('超时时间（分）').min(0).default(60),
-      timeoutAction: Schema.union([
-        Schema.const('accept').description('同意'),
-        Schema.const('reject').description('拒绝'),
-      ]).description('默认超时选项').default('reject'),
+        .description('通知目标(group/private:12345)').default(''),
     }),
   ]),
 ])
