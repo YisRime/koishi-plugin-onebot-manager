@@ -73,4 +73,75 @@ export function apply(ctx: Context, config: Config = {}) {
         return
       }
     });
+
+  // 精华消息
+  const ess = ctx.command('essence [messageId:string]', '设置精华消息')
+    .action(async ({ session }, messageId) => {
+      if (!messageId && session.quote) {
+        messageId = session.quote.id
+      }
+      if (!messageId) {
+        const message = await session.send('请提供消息ID或引用要设置为精华的消息')
+        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message)
+        return
+      }
+      try {
+        await session.onebot.setEssenceMsg(messageId);
+        return
+      } catch (error) {
+        const message = await session.send(`设置精华消息失败: ${error.message}`)
+        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message)
+        return
+      }
+    })
+  ess.subcommand('.del [messageId:string]', '移除精华消息')
+    .action(async ({ session }, messageId) => {
+      if (!messageId && session.quote) {
+        messageId = session.quote.id
+      }
+      if (!messageId) {
+        const message = await session.send('请提供消息ID或引用要移除精华的消息')
+        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message)
+        return
+      }
+      try {
+        await session.onebot.deleteEssenceMsg(messageId);
+        return
+      } catch (error) {
+        const message = await session.send(`移除精华消息失败: ${error.message}`)
+        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message)
+        return
+      }
+    });
+  ess.subcommand('.list [groupId:string]', '获取精华消息列表')
+    .action(async ({ session }, groupId) => {
+      const targetGroupId = groupId || session.guildId;
+      if (!targetGroupId) {
+        const message = await session.send('请提供群号')
+        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message)
+        return
+      }
+      try {
+        const essenceList = await session.onebot.getEssenceMsgList(targetGroupId);
+        if (!essenceList || essenceList.length === 0) {
+          return `群 ${targetGroupId} 暂无精华消息`;
+        }
+        const formatTime = (timestamp: number) => {
+          const date = new Date(timestamp * 1000);
+          return date.toLocaleString();
+        };
+        let result = `群 ${targetGroupId} 的精华消息列表（共 ${essenceList.length} 条）：\n`;
+        essenceList.forEach((item) => {
+          result += `发送者: ${item.sender_nick} (${item.sender_id})\n`;
+          result += `发送时间: ${formatTime(item.sender_time)}\n`;
+          result += `操作者: ${item.operator_nick} (${item.operator_id})\n`;
+          result += `设置时间: ${formatTime(item.operator_time)}\n`;
+        });
+        return result;
+      } catch (error) {
+        const message = await session.send(`获取精华消息列表失败: ${error.message}`)
+        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message)
+        return
+      }
+    });
 }
