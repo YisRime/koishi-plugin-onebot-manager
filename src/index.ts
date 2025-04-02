@@ -1,15 +1,26 @@
 import { Context, Schema } from 'koishi'
 import {} from "koishi-plugin-adapter-onebot";
-import { OnebotRequest, RequestOption } from './request'
+import { OnebotRequest, Request } from './request'
 import { utils } from './utils'
 
 export const name = 'onebot-manager'
-
+export const inject = { optional: ['database'] }
 export interface Config {
   enable?: boolean
   enableNotify?: boolean
   notifyTarget?: string
-  requestOption?: RequestOption
+  friendRequest?: Request
+  guildRequest?: Request
+  memberRequest?: Request
+  FriendRegTime?: number
+  FriendLevel?: number
+  FriendVipLevel?: number
+  MemberRegTime?: number
+  MemberLevel?: number
+  MemberVipLevel?: number
+  GuildAllowUsers?: string[]
+  GuildMinMemberCount?: number
+  GuildMaxCapacity?: number
 }
 
 // 配置模式
@@ -17,13 +28,26 @@ export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
     enable: Schema.boolean()
       .description('开启请求监听').default(true),
-    requestOption: Schema.union([
+    friendRequest: Schema.union([
       Schema.const('accept').description('同意'),
       Schema.const('reject').description('拒绝'),
       Schema.const('manual').description('手动'),
-    ]).description('如何处理请求').default('reject'),
+      Schema.const('auto').description('自动'),
+    ]).description('处理好友请求').default('reject'),
+    memberRequest: Schema.union([
+      Schema.const('accept').description('同意'),
+      Schema.const('reject').description('拒绝'),
+      Schema.const('manual').description('手动'),
+      Schema.const('auto').description('自动'),
+    ]).description('处理加群请求').default('reject'),
+    guildRequest: Schema.union([
+      Schema.const('accept').description('同意'),
+      Schema.const('reject').description('拒绝'),
+      Schema.const('manual').description('手动'),
+      Schema.const('auto').description('自动'),
+    ]).description('处理入群邀请').default('reject'),
     enableNotify: Schema.boolean()
-      .description('开启通知').default(false),
+      .description('开启请求通知').default(false),
   }).description('请求配置'),
   Schema.union([
     Schema.object({
@@ -32,13 +56,47 @@ export const Config: Schema<Config> = Schema.intersect([
         .description('通知目标(group/private:12345)').default(''),
     }),
   ]),
+
+  Schema.union([
+    Schema.object({
+      friendRequest: Schema.const('auto').required(),
+      FriendRegTime: Schema.number()
+        .description('最短注册年份').default(-1),
+      FriendLevel: Schema.number()
+        .description('最低QQ等级').default(-1),
+      FriendVipLevel: Schema.number()
+        .description('最低会员等级').default(-1),
+    }).description('好友请求通过配置'),
+  ]),
+  Schema.union([
+    Schema.object({
+      memberRequest: Schema.const('auto').required(),
+      MemberRegTime: Schema.number()
+        .description('最短注册年份').default(-1),
+      MemberLevel: Schema.number()
+        .description('最低QQ等级').default(-1),
+      MemberVipLevel: Schema.number()
+        .description('最低会员等级').default(-1),
+    }).description('加群请求通过配置'),
+  ]),
+  Schema.union([
+    Schema.object({
+      guildRequest: Schema.const('auto').required(),
+      GuildAllowUsers: Schema.array(String)
+        .description('邀请ID白名单').default([]),
+      GuildMinMemberCount: Schema.number()
+        .description('最低群成员数量').default(-1),
+      GuildMaxCapacity: Schema.number()
+        .description('最低群容量要求').default(-1),
+    }).description('入群邀请通过配置'),
+  ]),
 ])
 
 export function apply(ctx: Context, config: Config = {}) {
   const logger = ctx.logger('onebot-manager')
-  const request = new OnebotRequest(ctx, logger, config)
 
   if (config.enable !== false) {
+    const request = new OnebotRequest(ctx, logger, config)
     request.registerEventListeners()
   }
 
@@ -109,37 +167,6 @@ export function apply(ctx: Context, config: Config = {}) {
         return
       } catch (error) {
         const message = await session.send(`移除精华消息失败: ${error.message}`)
-        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message)
-        return
-      }
-    });
-  ess.subcommand('.list [groupId:string]', '获取精华消息列表')
-    .action(async ({ session }, groupId) => {
-      const targetGroupId = groupId || session.guildId;
-      if (!targetGroupId) {
-        const message = await session.send('请提供群号')
-        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message)
-        return
-      }
-      try {
-        const essenceList = await session.onebot.getEssenceMsgList(targetGroupId);
-        if (!essenceList || essenceList.length === 0) {
-          return `群 ${targetGroupId} 暂无精华消息`;
-        }
-        const formatTime = (timestamp: number) => {
-          const date = new Date(timestamp * 1000);
-          return date.toLocaleString();
-        };
-        let result = `群 ${targetGroupId} 的精华消息列表（共 ${essenceList.length} 条）：\n`;
-        essenceList.forEach((item) => {
-          result += `发送者: ${item.sender_nick} (${item.sender_id})\n`;
-          result += `发送时间: ${formatTime(item.sender_time)}\n`;
-          result += `操作者: ${item.operator_nick} (${item.operator_id})\n`;
-          result += `设置时间: ${formatTime(item.operator_time)}\n`;
-        });
-        return result;
-      } catch (error) {
-        const message = await session.send(`获取精华消息列表失败: ${error.message}`)
         await utils.autoRecall(session, Array.isArray(message) ? message[0] : message)
         return
       }
