@@ -114,15 +114,18 @@ export class OnebotRequest {
         if (comment) message += `验证信息：${comment}\n`;
         break;
       }
-      case 'guild':
+      case 'guild': {
+        const guild = await session.bot.getGuild?.(session.guildId)?.catch(() => null) ?? null;
+        const guildName = guild?.name ?? '未知群组';
+        message = `收到来自${userName}[${session.userId}]的入群邀请：\n群组：${guildName}[${session.guildId}]\n`;
+        break;
+      }
       case 'member': {
         const guild = await session.bot.getGuild?.(session.guildId)?.catch(() => null) ?? null;
         const guildName = guild?.name ?? '未知群组';
-        message = type === 'guild'
-          ? `收到入群邀请：\n群组：${guildName}[${session.guildId}]\n邀请人：${userName}[${session.userId}]\n邀请类型：${
-              session.event?._data?.sub_type === 'invite' ? '邀请机器人入群' : '被邀请入群'}\n`
-          : `收到加群请求：\n群组：${guildName}[${session.guildId}]\n申请人：${userName}[${session.userId}]\n${
-              session.event?._data?.comment ? `验证信息：${session.event?._data?.comment}\n` : ''}`;
+        const comment = session.event?._data?.comment ?? '';
+        message = `收到来自${userName}[${session.userId}]的加群请求：\n群组：${guildName}[${session.guildId}]\n`;
+        if (comment) message += `验证信息：${comment}\n`;
         break;
       }
     }
