@@ -55,6 +55,7 @@ export const Config: Schema<Config> = Schema.intersect([
       notifyTarget: Schema.string()
         .description('通知目标(group/private:12345)').default(''),
     }),
+    Schema.object({}),
   ]),
 
   Schema.union([
@@ -67,6 +68,7 @@ export const Config: Schema<Config> = Schema.intersect([
       FriendVipLevel: Schema.number()
         .description('最低会员等级').default(-1),
     }).description('好友请求通过配置'),
+    Schema.object({}),
   ]),
   Schema.union([
     Schema.object({
@@ -78,6 +80,7 @@ export const Config: Schema<Config> = Schema.intersect([
       MemberVipLevel: Schema.number()
         .description('最低会员等级').default(-1),
     }).description('加群请求通过配置'),
+    Schema.object({}),
   ]),
   Schema.union([
     Schema.object({
@@ -89,6 +92,7 @@ export const Config: Schema<Config> = Schema.intersect([
       GuildMaxCapacity: Schema.number()
         .description('最低群容量要求').default(-1),
     }).description('入群邀请通过配置'),
+    Schema.object({}),
   ]),
 ])
 
