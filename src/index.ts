@@ -140,7 +140,7 @@ export function apply(ctx: Context, config: Config = {}) {
   const ess = ctx.command('essence [messageId:string]', '设置精华消息')
     .action(async ({ session }, messageId) => {
       if (!messageId && session.quote) {
-        messageId = session.quote.id
+        messageId = session.quote.messageId || session.quote.id
       }
       if (!messageId) {
         const message = await session.send('请提供消息ID或引用要设置为精华的消息')
@@ -159,7 +159,7 @@ export function apply(ctx: Context, config: Config = {}) {
   ess.subcommand('.del [messageId:string]', '移除精华消息')
     .action(async ({ session }, messageId) => {
       if (!messageId && session.quote) {
-        messageId = session.quote.id
+        messageId = session.quote.messageId || session.quote.id
       }
       if (!messageId) {
         const message = await session.send('请提供消息ID或引用要移除精华的消息')
