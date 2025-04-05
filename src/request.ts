@@ -33,6 +33,8 @@ export interface OneBotGroupInfo {
  * OneBot请求处理类
  */
 export class OnebotRequest {
+  private processedGuildRequests = new Set<string>();
+
   constructor(
     private ctx: Context,
     private logger: Logger,
@@ -246,6 +248,11 @@ export class OnebotRequest {
    */
   public async processRequest(session: Session, type: RequestType): Promise<void> {
     const request = this.getRequest(type);
+    // 如果是群组请求类型，记录此请求
+    if (type === 'guild') {
+      const requestKey = `${session.platform}:${session.userId}:${session.guildId || ''}`;
+      this.processedGuildRequests.add(requestKey);
+    }
     // 处理自动选项
     if (request === 'auto') {
       const result = await this.shouldAutoAccept(session, type);
@@ -278,8 +285,21 @@ export class OnebotRequest {
       }
       await this.processRequest(session, type);
     };
+    // 检查是否为已处理过的guild-request后的guild-added事件
+    const handleGuildAdded = async (session: Session) => {
+      session.userId = session.event._data.user_id?.toString();
+      session.guildId = session.event._data.group_id?.toString() || '';
+      // 检查是否已经处理过对应的guild-request
+      const requestKey = `${session.platform}:${session.userId}:${session.guildId}`;
+      if (this.processedGuildRequests.has(requestKey)) {
+        return;
+      }
+      await this.processRequest(session, 'guild');
+    };
+
     this.ctx.on('friend-request', handleEvent('friend'));
     this.ctx.on('guild-request', handleEvent('guild'));
     this.ctx.on('guild-member-request', handleEvent('member'));
+    this.ctx.on('guild-added', handleGuildAdded);
   }
 }

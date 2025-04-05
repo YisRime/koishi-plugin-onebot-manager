@@ -107,6 +107,11 @@ export function apply(ctx: Context, config: Config = {}) {
   // 设置群组专属头衔
   ctx.command('tag [title:text] [target]', '设置群组专属头衔')
     .action(async ({ session }, title = '', target) => {
+      if (title && !/^[\p{L}\p{N}\p{Z}\p{P}]+$/u.test(title)) {
+        const message = await session.send('设置头衔失败: 非文字内容')
+        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message)
+        return
+      }
       let userId = session.userId
       if (target) {
         const parsedId = utils.parseTarget(target)
@@ -137,7 +142,7 @@ export function apply(ctx: Context, config: Config = {}) {
     });
 
   // 精华消息
-  const ess = ctx.command('essence [messageId:string]', '设置精华消息')
+  const ess = ctx.command('essence [messageId:string]', '设置精华消息', { authority: 2 })
     .action(async ({ session }, messageId) => {
       if (!messageId && session.quote) {
         messageId = session.quote.messageId || session.quote.id
@@ -156,7 +161,7 @@ export function apply(ctx: Context, config: Config = {}) {
         return
       }
     })
-  ess.subcommand('.del [messageId:string]', '移除精华消息')
+  ess.subcommand('.del [messageId:string]', '移除精华消息', { authority: 3 })
     .action(async ({ session }, messageId) => {
       if (!messageId && session.quote) {
         messageId = session.quote.messageId || session.quote.id
