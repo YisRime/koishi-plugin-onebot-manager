@@ -71,7 +71,7 @@ export class OnebotRequest {
         const regYear = regTime > 0 ? new Date(regTime * 1000).getFullYear() : currentYear;
         const accountAgeYears = currentYear - regYear;
         if (accountAgeYears < regTimeLimit)
-          return `账号注册时间不满${regTimeLimit}年`;
+          return `注册时间不满${regTimeLimit}年`;
       }
       // 检查QQ等级
       if (levelLimit >= 0) {
@@ -190,7 +190,11 @@ export class OnebotRequest {
   /**
    * 设置通知与响应监听
    */
-  private async setupNotification(session: Session, type: RequestType): Promise<boolean> {
+  private async setupNotification(
+    session: Session,
+    type: RequestType,
+    isManualMode: boolean = false
+  ): Promise<boolean> {
     const { enableNotify = false, notifyTarget = '' } = this.config;
     if (!enableNotify || !notifyTarget) return false;
     const [targetType, targetId] = notifyTarget.split(':');
@@ -207,35 +211,42 @@ export class OnebotRequest {
       const message = await this.createNotificationMessage(session, type);
       if (!message) return false;
       // 发送通知
-      normalizedType === 'group'
-        ? await session.bot.sendMessage(targetId, message)
-        : await session.bot.sendPrivateMessage(targetId, message)
-            .then(() => session.bot.sendPrivateMessage(targetId, `请回复 y/n [备注/理由] 来处理申请`));
-      // 创建响应监听器
-      const disposer = this.ctx.middleware(async (session2, next) => {
-        const isRelevant = normalizedType === 'group'
-          ? session2.channelId === targetId && !session2.content.startsWith('.')
-          : session2.userId === targetId && session2.channelId.startsWith('private:');
-        if (!isRelevant) return next();
-        const content = session2.content.trim();
-        const lowerContent = content.toLowerCase();
-        const isApprove = lowerContent === 'y' || lowerContent.startsWith('y ');
-        const isReject = lowerContent === 'n' || lowerContent.startsWith('n ');
-        if (!isApprove && !isReject) return next();
-        // 处理响应
-        disposer();
-        if (isApprove) {
-          const remark = lowerContent.startsWith('y ') && type === 'friend' ? content.slice(2).trim() : '';
-          await this.processRequestAction(session, type, true, '', remark);
-        } else {
-          const reason = content.startsWith('n ') ? content.slice(2).trim() : '';
-          await this.processRequestAction(session, type, false, reason);
+      if (normalizedType === 'group') {
+        await session.bot.sendMessage(targetId, message);
+      } else {
+        await session.bot.sendPrivateMessage(targetId, message);
+        // 只有手动模式才需要额外的指导信息和监听器
+        if (isManualMode) {
+          await session.bot.sendPrivateMessage(targetId, `请回复 y/n [备注/理由] 来处理申请`);
         }
-        if (normalizedType === 'private') {
-          await session.bot.sendPrivateMessage(targetId, isApprove ? '已通过' : '已拒绝');
-        }
-        return next();
-      });
+      }
+      // 只有手动模式才创建响应监听器
+      if (isManualMode) {
+        const disposer = this.ctx.middleware(async (session2, next) => {
+          const isRelevant = normalizedType === 'group'
+            ? session2.channelId === targetId && !session2.content.startsWith('.')
+            : session2.userId === targetId && session2.channelId.startsWith('private:');
+          if (!isRelevant) return next();
+          const content = session2.content.trim();
+          const lowerContent = content.toLowerCase();
+          const isApprove = lowerContent === 'y' || lowerContent.startsWith('y ');
+          const isReject = lowerContent === 'n' || lowerContent.startsWith('n ');
+          if (!isApprove && !isReject) return next();
+          // 处理响应
+          disposer();
+          if (isApprove) {
+            const remark = lowerContent.startsWith('y ') && type === 'friend' ? content.slice(2).trim() : '';
+            await this.processRequestAction(session, type, true, '', remark);
+          } else {
+            const reason = content.startsWith('n ') ? content.slice(2).trim() : '';
+            await this.processRequestAction(session, type, false, reason);
+          }
+          if (normalizedType === 'private') {
+            await session.bot.sendPrivateMessage(targetId, isApprove ? '已通过' : '已拒绝');
+          }
+          return next();
+        });
+      }
       return true;
     } catch (error) {
       this.logger.error(`通知发送失败: ${error}`);
@@ -253,8 +264,11 @@ export class OnebotRequest {
       const requestKey = `${session.platform}:${session.userId}:${session.guildId || ''}`;
       this.processedGuildRequests.add(requestKey);
     }
-    // 处理自动选项
+    // 发送通知
+    const notified = await this.setupNotification(session, type, request === 'manual');
+    // 根据请求类型处理
     if (request === 'auto') {
+      // 自动模式下，根据条件判断是否接受
       const result = await this.shouldAutoAccept(session, type);
       if (result === true) {
         await this.processRequestAction(session, type, true);
@@ -264,9 +278,11 @@ export class OnebotRequest {
       }
       return;
     }
-    // 设置通知与监听
-    const notified = await this.setupNotification(session, type);
-    if (!notified && request !== 'manual') {
+    // 非手动模式且没有开启通知或通知失败，直接处理
+    if (request !== 'manual' && !notified) {
+      await this.processRequestAction(session, type, request === 'accept');
+    } else if (request !== 'manual') {
+      // 非手动模式且通知成功，仍然自动处理
       await this.processRequestAction(session, type, request === 'accept');
     } else if (!notified && this.config.enableNotify) {
       // 手动处理但通知失败
