@@ -1,4 +1,4 @@
-import { Session, h } from 'koishi';
+import { Session, h, Logger } from 'koishi';
 
 /**
  * 工具函数集合
@@ -35,5 +35,33 @@ export const utils = {
       session.bot?.deleteMessage(session.channelId, message.toString())
         .catch(() => {/* 忽略撤回失败 */})
     }, delay)
+  },
+
+  /**
+   * 检查机器人在群内的权限
+   * @param {Session} session - 会话对象
+   * @param {string} botId - 机器人ID，如果未提供则使用session.selfId
+   * @param {Logger} [logger] - 可选的日志记录器
+   * @returns {Promise<string | null>} 返回权限身份('owner'|'admin'|'member')或null
+   */
+  async checkBotPermission(session: Session, botId?: string, logger?: Logger): Promise<string | null> {
+    if (!session.guildId) return null;
+    try {
+      const actualBotId = botId || session.selfId;
+      const memberInfo = await session.onebot.getGroupMemberInfo(
+        Number(session.guildId),
+        Number(actualBotId),
+        true
+      );
+      if (!memberInfo || !memberInfo.role) {
+        return null;
+      }
+      return memberInfo.role;
+    } catch (error) {
+      if (logger) {
+        logger.error('获取机器人信息失败:', error);
+      }
+      return null;
+    }
   }
 }
