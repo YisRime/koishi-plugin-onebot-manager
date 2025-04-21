@@ -6,6 +6,20 @@ import { utils } from './utils'
 export const name = 'onebot-manager'
 export const inject = { optional: ['database'] }
 
+export const usage = `
+<div style="border-radius: 10px; border: 1px solid #ddd; padding: 16px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+  <h2 style="margin-top: 0; color: #4a6ee0;">📌 插件说明</h2>
+  <p>📖 <strong>使用文档</strong>：请点击左上角的 <strong>插件主页</strong> 查看插件使用文档</p>
+  <p>🔍 <strong>更多插件</strong>：可访问 <a href="https://github.com/YisRime" style="color:#4a6ee0;text-decoration:none;">苡淞的 GitHub</a> 查看本人的所有插件</p>
+</div>
+
+<div style="border-radius: 10px; border: 1px solid #ddd; padding: 16px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+  <h2 style="margin-top: 0; color: #e0574a;">❤️ 支持与反馈</h2>
+  <p>🌟 喜欢这个插件？请在 <a href="https://github.com/YisRime" style="color:#e0574a;text-decoration:none;">GitHub</a> 上给我一个 Star！</p>
+  <p>🐛 遇到问题？请通过 <strong>Issues</strong> 提交反馈，或加入 QQ 群 <a href="https://qm.qq.com/q/PdLMx9Jowq" style="color:#e0574a;text-decoration:none;"><strong>855571375</strong></a> 进行交流</p>
+</div>
+`
+
 /**
  * 插件配置接口
  * @interface Config
@@ -126,41 +140,63 @@ export function apply(ctx: Context, config: Config = {}) {
     request.registerEventListeners()
   }
 
-  const admin = ctx.command('admin', '群组管理')
+  const qmanager = ctx.command('qmanager', '群组管理')
 
-  admin.subcommand('tag [title:text] [target]', '设置专属头衔')
-    .usage('可使用引号添加以空格分隔的内容，如"原神 启动"')
+  qmanager.subcommand('tag [title:string] [target]', '设置专属头衔')
+    .usage('可使用引号添加以空格分隔的内容，如"原神 启动"，总计不能超过 18 字符')
     .action(async ({ session }, title = '', target) => {
-      const role = await utils.checkBotPermission(session, config.botId, logger);
-      if (role !== 'owner') {
+      const botRole = await utils.checkBotPermission(session, config.botId, logger);
+      if (botRole !== 'owner') {
         const message = await session.send('设置头衔失败: 只有群主可设置专属头衔');
-        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
+        utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
         return;
       }
-      if (title && !/^[\p{L}\p{N}\p{Z}\p{P}]+$/u.test(title)) {
-        const message = await session.send('设置头衔失败: 非文字内容');
-        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
-        return;
-      }
-      const userId = target ? utils.parseTarget(target) : session.userId;
       try {
+        if (title) {
+          const titleLength = title.length + (title.match(/[\u4e00-\u9fa5]/g)?.length || 0) * 2;
+          if (titleLength > 18) {
+            const message = await session.send('设置头衔失败: 头衔长度超过18个字符');
+            utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
+            return;
+          }
+        }
+        // 确定目标用户ID
+        let targetId = session.userId;
+        if (target) {
+          const memberInfo = await session.onebot.getGroupMemberInfo(
+            Number(session.guildId),
+            Number(session.userId),
+            true
+          );
+          if (memberInfo?.role === 'member') {
+            const message = await session.send('权限不足: 普通成员只能设置自己的头衔');
+            utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
+          } else {
+            const parsedId = utils.parseTarget(target);
+            if (parsedId) {
+              targetId = parsedId;
+            } else {
+              const message = await session.send('无效的目标用户');
+              utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
+              return;
+            }
+          }
+        }
+        // 执行设置头衔操作
         await session.onebot.setGroupSpecialTitle(
           Number(session.guildId),
-          Number(userId),
+          Number(targetId),
           title
         );
-        const targetDesc = userId === session.userId ? '您' : `用户 ${userId}`;
-        return title
-          ? `已将${targetDesc}的头衔设置为：${title}`
-          : `已清除${targetDesc}的头衔`;
+        // 返回成功信息
+        return `已${title ? '将' : '清除'}${targetId === session.userId ? '您' : `用户 ${targetId}`}的头衔${title ? `设置为：${title}` : ''}`;
       } catch (error) {
         const message = await session.send(`设置头衔失败: ${error.message}`);
-        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
-        return;
+        utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
       }
     });
 
-  const ess = admin.subcommand('essence [messageId:string]', '设置精华消息')
+  const ess = qmanager.subcommand('essence [messageId:string]', '设置精华消息')
     .action(async ({ session }, messageId) => {
       const role = await utils.checkBotPermission(session, config.botId, logger);
       if (!role || (role !== 'owner' && role !== 'admin')) {

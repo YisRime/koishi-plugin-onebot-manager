@@ -1,4 +1,6 @@
 import { Session, h, Logger } from 'koishi';
+import fs from 'fs';
+import path from 'path';
 
 /**
  * 工具函数集合
@@ -62,6 +64,55 @@ export const utils = {
         logger.error('获取机器人信息失败:', error);
       }
       return null;
+    }
+  },
+
+  /**
+   * 文件操作工具
+   */
+  file: {
+    /**
+     * 获取数据文件路径
+     * @param filename 文件名
+     * @returns 完整的文件路径
+     */
+    getFilePath(filename: string): string {
+      const dataDir = path.resolve(process.cwd(), 'data', 'onebot-manager');
+      // 确保目录存在
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+      return path.join(dataDir, filename);
+    },
+
+    /**
+     * 读取JSON文件
+     * @param filename 文件名
+     * @param defaultValue 默认值（如果文件不存在或解析失败）
+     * @returns 解析后的对象
+     */
+    readJSON<T>(filename: string, defaultValue: T): T {
+      const filePath = this.getFilePath(filename);
+      try {
+        if (!fs.existsSync(filePath)) return defaultValue;
+        return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as T;
+      } catch (error) {
+        return defaultValue;
+      }
+    },
+
+    /**
+     * 写入JSON文件
+     * @param filename 文件名
+     * @param data 要写入的数据
+     */
+    writeJSON<T>(filename: string, data: T): void {
+      const filePath = this.getFilePath(filename);
+      try {
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+      } catch (error) {
+        console.error(`写入文件失败:`, error);
+      }
     }
   }
 }
