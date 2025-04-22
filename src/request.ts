@@ -2,104 +2,74 @@ import { Context, Logger, Session } from 'koishi'
 import { Config } from './index'
 
 /**
- * 请求处理方式
- * @typedef {string} Request
- * - accept: 自动接受
- * - reject: 自动拒绝
- * - manual: 手动处理
- * - auto: 根据条件自动处理
+ * 请求处理模式
+ * - accept: 自动接受所有请求
+ * - reject: 自动拒绝所有请求
+ * - manual: 手动处理请求
+ * - auto: 根据预设条件自动处理请求
  */
 export type Request = 'accept' | 'reject' | 'manual' | 'auto'
 
 /**
- * 超时后的处理方式
- * @typedef {string} TimeoutAction
- */
-export type TimeoutAction = 'accept' | 'reject'
-
-/**
  * 请求类型
- * @typedef {string} RequestType
+ * - friend: 好友请求
+ * - guild: 群组请求
+ * - member: 群成员请求
  */
 export type RequestType = 'friend' | 'guild' | 'member'
 
 /**
- * 通知目标配置
- * @interface NotifyTarget
- */
-export interface NotifyTarget {
-  /** 通知类型：群聊或私聊 */
-  type: 'group' | 'private',
-  /** 目标ID */
-  id: string
-}
-
-/**
- * OneBot用户信息接口
- * @interface OneBotUserInfo
+ * OneBot 用户信息接口
  */
 export interface OneBotUserInfo {
-  /** 用户ID */
+  /** 用户 ID */
   user_id: number
-  /** 注册时间（秒级时间戳，旧版API） */
+  /** 注册时间（秒级时间戳） */
   regTime?: number
-  /** 注册时间（秒级时间戳，新版API） */
+  /** 注册时间（秒级时间戳） */
   reg_time?: number
-  /** QQ等级（旧版API） */
+  /** QQ等级 */
   qqLevel?: number
-  /** QQ等级（新版API） */
+  /** QQ等级 */
   level?: number
-  /** 是否为会员 */
+  /** 是否为 VIP 用户 */
   is_vip?: boolean
-  /** 是否为年费会员 */
+  /** 是否为年费 VIP 用户 */
   is_years_vip?: boolean
-  /** 会员等级 */
+  /** VIP 等级 */
   vip_level?: number
 }
 
 /**
- * OneBot群组信息接口
- * @interface OneBotGroupInfo
+ * OneBot 群组信息接口
  */
 export interface OneBotGroupInfo {
-  /** 群组ID */
+  /** 群组 ID */
   group_id: number
-  /** 群名称 */
+  /** 群组名称 */
   group_name: string
-  /** 群备注 */
+  /** 群组备注 */
   group_remark?: string
   /** 成员数量 */
   member_count: number
-  /** 最大成员数量 */
+  /** 群组最大成员数 */
   max_member_count: number
 }
 
 /**
- * OneBot请求管理类
- * 处理好友请求、入群请求和加群请求
+ * OneBot 请求处理类
+ * 处理好友请求、群组请求和群成员请求
  */
 export class OnebotRequest {
-  /** 已处理的请求ID集合 */
-  private processedRequests = new Set<string>();
-
-  /** 待处理的请求映射 */
-  private pendingRequests = new Map<string, {
-    session: Session,
-    type: RequestType,
-    disposer?: () => void
-  }>();
-
-  /** 请求编号到请求ID的映射 */
+  private pendingRequests = new Map<string, { session: Session, type: RequestType }>();
   private requestNumberMap = new Map<number, string>();
-
-  /** 下一个请求编号 */
   private nextRequestNumber = 1;
 
   /**
-   * 创建OneBot请求处理器
-   * @param ctx Koishi上下文
-   * @param logger 日志记录器
-   * @param config 配置对象
+   * 创建 OneBot 请求处理实例
+   * @param ctx - Koishi 上下文
+   * @param logger - 日志记录器
+   * @param config - 配置项
    */
   constructor(
     private ctx: Context,
@@ -108,23 +78,17 @@ export class OnebotRequest {
   ) {}
 
   /**
-   * 处理请求流程
-   * @param session 会话对象
-   * @param type 请求类型
-   * @returns Promise<void>
+   * 处理收到的请求
+   * @param session - Koishi 会话
+   * @param type - 请求类型
+   * @returns 处理请求的 Promise
    */
   public async processRequest(session: Session, type: RequestType): Promise<void> {
-    // 创建请求ID
     const requestId = `${type}:${session.userId}:${session.guildId || 'none'}`;
-    // 检查是否已处理过
-    if (this.processedRequests.has(requestId)) return;
-    this.processedRequests.add(requestId);
-    // 获取处理模式
     const requestMode = this.config[`${type}Request`] as Request || 'reject';
+    let notified = false;
     try {
-      // 发送通知
-      const notified = await this.setupNotification(session, type, requestId, requestMode === 'manual');
-      // 处理逻辑
+      notified = await this.setupNotification(session, type, requestId, requestMode === 'manual');
       if (requestMode === 'auto') {
         const result = await this.shouldAutoAccept(session, type);
         await this.processRequestAction(
@@ -132,10 +96,8 @@ export class OnebotRequest {
           typeof result === 'string' ? result : '条件不符'
         );
       } else if (requestMode === 'manual' && notified) {
-        // 手动模式且通知成功：等待响应
         return;
       } else {
-        // 其他情况：自动处理
         await this.processRequestAction(
           session, type, requestMode === 'accept',
           requestMode === 'manual' && !notified ? '通知失败，已自动处理' : ''
@@ -143,26 +105,32 @@ export class OnebotRequest {
       }
     } catch (error) {
       this.logger.error(`处理请求${requestId}失败: ${error}`);
-      await this.processRequestAction(session, type, false, '处理出错').catch(() => {});
+      try {
+        await this.processRequestAction(session, type, false, '处理出错');
+      } catch {}
     } finally {
-      // 清理资源
-      const pending = this.pendingRequests.get(requestId);
-      if (pending?.disposer) pending.disposer();
-      this.pendingRequests.delete(requestId);
-      // 清理请求号映射
-      for (const [num, id] of this.requestNumberMap.entries()) {
-        if (id === requestId) this.requestNumberMap.delete(num);
-      }
+      this.cleanupRequest(requestId);
     }
   }
 
   /**
-   * 检查用户条件是否满足设置的要求
-   * @param session 会话对象
-   * @param regTimeLimit 注册时间限制（年）
-   * @param levelLimit QQ等级限制
-   * @param vipLevelLimit 会员等级限制
-   * @returns 通过返回true，不通过返回拒绝原因
+   * 清理请求数据
+   * @param requestId - 请求 ID
+   */
+  private cleanupRequest(requestId: string): void {
+    this.pendingRequests.delete(requestId);
+    for (const [num, id] of this.requestNumberMap.entries()) {
+      if (id === requestId) this.requestNumberMap.delete(num);
+    }
+  }
+
+  /**
+   * 检查用户条件是否满足自动接受要求
+   * @param session - Koishi 会话
+   * @param regTimeLimit - 注册时间要求（年数，-1表示不检查）
+   * @param levelLimit - QQ等级要求（-1表示不检查）
+   * @param vipLevelLimit - VIP等级要求（-1表示不检查）
+   * @returns 是否满足条件，如不满足返回原因
    */
   private async checkUserConditions(
     session: Session,
@@ -173,20 +141,15 @@ export class OnebotRequest {
     if (regTimeLimit < 0 && levelLimit < 0 && vipLevelLimit < 0) return false;
     try {
       const userInfo = await session.onebot.getStrangerInfo(Number(session.userId), false) as OneBotUserInfo;
-      // 检查注册时间
       if (regTimeLimit >= 0) {
         const regTime = userInfo.reg_time || userInfo.regTime || 0;
         const regYear = regTime > 0 ? new Date(regTime * 1000).getFullYear() : new Date().getFullYear();
         if (new Date().getFullYear() - regYear < regTimeLimit) return `注册时间不满${regTimeLimit}年`;
       }
-      // 检查QQ等级
-      if (levelLimit >= 0 && (userInfo.level || userInfo.qqLevel || 0) < levelLimit) {
-        return `QQ等级低于${levelLimit}`;
-      }
-      // 检查会员等级
-      if (vipLevelLimit >= 0 && (!userInfo.is_vip || (userInfo.vip_level || 0) < vipLevelLimit)) {
-        return `会员等级低于${vipLevelLimit}`;
-      }
+      if (levelLimit >= 0 && (userInfo.level || userInfo.qqLevel || 0) < levelLimit)
+        return `QQ等级低于${levelLimit}级`;
+      if (vipLevelLimit >= 0 && (!userInfo.is_vip || (userInfo.vip_level || 0) < vipLevelLimit))
+        return `会员等级低于${vipLevelLimit}级`;
       return true;
     } catch (error) {
       return `获取用户信息失败: ${error}`;
@@ -194,29 +157,29 @@ export class OnebotRequest {
   }
 
   /**
-   * 判断是否自动通过请求
-   * @param session 会话对象
-   * @param type 请求类型
-   * @returns 通过返回true，不通过返回拒绝原因
+   * 判断是否应自动接受请求
+   * @param session - Koishi 会话
+   * @param type - 请求类型
+   * @returns 是否接受，如不接受返回原因
    */
   private async shouldAutoAccept(session: Session, type: RequestType): Promise<boolean | string> {
-    if (type === 'friend') {
-      const { FriendRegTime = -1, FriendLevel = -1, FriendVipLevel = -1 } = this.config;
-      return this.checkUserConditions(session, FriendRegTime, FriendLevel, FriendVipLevel);
-    }
-    if (type === 'member') {
-      const { MemberRegTime = -1, MemberLevel = -1, MemberVipLevel = -1 } = this.config;
-      return this.checkUserConditions(session, MemberRegTime, MemberLevel, MemberVipLevel);
+    if (type === 'friend' || type === 'member') {
+      const configPrefix = type === 'friend' ? 'Friend' : 'Member';
+      return this.checkUserConditions(
+        session,
+        this.config[`${configPrefix}RegTime`] ?? -1,
+        this.config[`${configPrefix}Level`] ?? -1,
+        this.config[`${configPrefix}VipLevel`] ?? -1
+      );
     }
     if (type === 'guild') {
       const { GuildAllowUsers = [], GuildMinMemberCount = -1, GuildMaxCapacity = -1 } = this.config;
-      // 白名单或权限检查
       if (GuildAllowUsers.includes(session.userId)) return true;
+      let user;
       try {
-        const user = await this.ctx.database.getUser(session.platform, session.userId);
-        if (user?.authority > 1) return true;
+        user = await this.ctx.database.getUser(session.platform, session.userId);
       } catch {}
-      // 群信息检查
+      if (user?.authority > 1) return true;
       if (GuildMinMemberCount >= 0 || GuildMaxCapacity >= 0) {
         try {
           const info = await session.onebot.getGroupInfo(Number(session.guildId), true) as OneBotGroupInfo;
@@ -234,12 +197,12 @@ export class OnebotRequest {
   }
 
   /**
-   * 处理请求动作（接受/拒绝）
-   * @param session 会话对象
-   * @param type 请求类型
-   * @param approve 是否通过
-   * @param reason 拒绝理由
-   * @param remark 好友备注
+   * 处理请求操作（接受或拒绝）
+   * @param session - Koishi 会话
+   * @param type - 请求类型
+   * @param approve - 是否接受请求
+   * @param reason - 拒绝原因
+   * @param remark - 好友备注（仅适用于好友请求）
    * @returns 处理是否成功
    */
   private async processRequestAction(
@@ -249,27 +212,29 @@ export class OnebotRequest {
     reason = '',
     remark = ''
   ): Promise<boolean> {
-    // 处理直接入群后拒绝的特殊情况
-    if (!approve && type === 'guild' && session.event?.type === 'guild-added') {
-      if (reason) {
-        await session.bot.sendMessage(session.guildId, `${reason} 机器人将退出该群组。`)
-          .catch(e => this.logger.warn(`发送退群原因失败: ${e}`));
+    try {
+      const eventData = session.event?._data || {};
+      if (!approve && type === 'guild' &&
+          (session.event?.type === 'guild-added' || eventData.notice_type === 'group_increase')) {
+        if (reason) {
+          await session.bot.sendMessage(session.guildId, `机器人将退出该群${reason}`)
+        }
+        try {
+          await session.onebot.setGroupLeave(Number(session.guildId), false);
+          return true;
+        } catch (error) {
+          this.logger.error(`退出群组 ${session.guildId} 失败: ${error}`);
+          return false;
+        }
       }
-      try {
-        await session.onebot.setGroupLeave(Number(session.guildId), false);
-        return true;
-      } catch (error) {
-        this.logger.error(`退出群组 ${session.guildId} 失败: ${error}`);
+      const flag = eventData.flag;
+      if (!flag) {
         return false;
       }
-    }
-    // 常规请求处理
-    try {
-      const flag = session.event._data.flag;
       if (type === 'friend') {
         await session.onebot.setFriendAddRequest(flag, approve, remark);
       } else {
-        const subType = session.event._data.sub_type ?? 'add';
+        const subType = eventData.sub_type ?? 'add';
         await session.onebot.setGroupAddRequest(flag, subType, approve, approve ? '' : reason);
       }
       return true;
@@ -280,12 +245,12 @@ export class OnebotRequest {
   }
 
   /**
-   * 设置通知与响应监听
-   * @param session 会话对象
-   * @param type 请求类型
-   * @param requestId 请求ID
-   * @param isManualMode 是否为手动模式
-   * @returns 通知是否成功
+   * 设置通知
+   * @param session - Koishi 会话
+   * @param type - 请求类型
+   * @param requestId - 请求 ID
+   * @param isManualMode - 是否为手动处理模式
+   * @returns 通知是否成功发送
    */
   private async setupNotification(
     session: Session,
@@ -295,82 +260,60 @@ export class OnebotRequest {
   ): Promise<boolean> {
     const { enableNotify = false, notifyTarget = '' } = this.config;
     if (!enableNotify || !notifyTarget) return false;
-    // 解析通知目标
     const [targetType, targetId] = notifyTarget.split(':');
     const normalizedType = targetType?.toLowerCase();
-    if (!targetId || (normalizedType !== 'group' && normalizedType !== 'private')) {
+    if (!targetId || (normalizedType !== 'guild' && normalizedType !== 'private')) {
       this.logger.warn(`通知目标错误: ${notifyTarget}`);
       return false;
     }
     try {
-      // 生成通知消息
       const requestNumber = this.nextRequestNumber++;
       this.requestNumberMap.set(requestNumber, requestId);
-      // 获取用户和群组信息
-      const user = await session.bot.getUser?.(session.userId)?.catch(() => null) ?? null;
-      const userName = user?.name ?? '未知用户';
-      let message = `${requestNumber}. 收到来自${userName}[${session.userId}]的`;
+      const isPrivate = normalizedType === 'private';
+      const eventData = session.event?._data || {};
+      let user: any = null, guild: any = null, operator: any = null;
+      try {
+        user = await session.bot.getUser?.(session.userId)?.catch(() => null) ?? null;
+        if (type !== 'friend') {
+          guild = await session.bot.getGuild?.(session.guildId)?.catch(() => null) ?? null;
+        }
+        if (type === 'guild') {
+          const operatorId = eventData.operator_id;
+          if (operatorId && operatorId !== session.userId) {
+            operator = await session.bot.getUser?.(operatorId.toString())?.catch(() => null) ?? null;
+          }
+        }
+      } catch {}
+      let message = `时间：${new Date().toLocaleString()}\n`;
+      if (session.userId) message += `用户：${user?.name ? `${user.name}(${session.userId})` : session.userId}\n`;
       if (type === 'friend') {
-        message += `好友申请：\n`;
+        message += `类型：好友申请\n`;
         if (user?.avatar) message += `<image url="${user.avatar}"/>\n`;
-        const comment = session.event?._data?.comment;
-        if (comment) message += `验证信息：${comment}\n`;
+        if (eventData.comment) message += `验证信息：${eventData.comment}\n`;
       } else {
-        const guild = await session.bot.getGuild?.(session.guildId)?.catch(() => null) ?? null;
-        const guildName = guild?.name ?? '未知群组';
-        message += `${type === 'guild' ? '入群' : '加群'}${guildName}[${session.guildId}]${type === 'guild' ? '邀请' : '请求'}\n`;
-        if (type === 'member' && session.event?._data?.comment) {
-          message += `验证信息：${session.event._data.comment}\n`;
+        if (session.guildId) message += `群组：${guild?.name ? `${guild.name}(${session.guildId})` : session.guildId}\n`;
+        if (type === 'guild') {
+          if (eventData.sub_type)
+            message += `类型：${eventData.sub_type === 'invite' ? '群邀请' : '直接入群'}\n`;
+          const operatorId = eventData.operator_id;
+          if (operatorId && operatorId !== session.userId)
+            message += `操作者：${operator?.name ? `${operator.name}(${operatorId})` : operatorId}\n`;
+        } else if (type === 'member') {
+          message += `类型：加群请求\n`;
+          if (eventData.comment) message += `💬 验证信息：${eventData.comment}\n`;
         }
       }
-      // 发送通知
-      const isPrivate = normalizedType === 'private';
-      await (isPrivate
-        ? session.bot.sendPrivateMessage(targetId, message)
-        : session.bot.sendMessage(targetId, message));
-      // 手动模式
+      const requestMode = this.config[`${type}Request`] as Request || 'reject';
+      message += `处理模式：${isManualMode ? '人工审核' :
+                  requestMode === 'auto' ? '自动审核' :
+                  requestMode === 'accept' ? '自动通过' : '自动拒绝'}\n`;
+      const sendFunc = isPrivate ?
+        (msg) => session.bot.sendPrivateMessage(targetId, msg) :
+        (msg) => session.bot.sendMessage(targetId, msg);
+      await sendFunc(message);
       if (isManualMode) {
-        if (isPrivate) {
-          await session.bot.sendPrivateMessage(
-            targetId,
-            `请使用 通过[y]${requestNumber}/拒绝[n]${requestNumber} [备注/理由] 处理此请求`
-          );
-        }
-        // 创建响应处理器
-        const disposer = this.ctx.middleware(async (s, next) => {
-          // 检查消息相关性
-          const isRelevant = !isPrivate
-            ? s.channelId === targetId && !s.content.startsWith('.')
-            : s.userId === targetId && s.channelId.startsWith('private:');
-          if (!isRelevant) return next();
-          // 匹配命令格式
-          const content = s.content.trim();
-          const match = content.match(new RegExp(`^(y|n|通过|拒绝)(${requestNumber})\\s*(.*)$`));
-          if (!match) return next();
-          const isApprove = match[1] === 'y' || match[1] === '通过';
-          const extraContent = match[3]?.trim() || '';
-          // 处理响应
-          disposer();
-          this.pendingRequests.delete(requestId);
-          this.requestNumberMap.delete(requestNumber);
-          try {
-            await this.processRequestAction(
-              session, type, isApprove,
-              !isApprove ? extraContent : '',
-              isApprove && type === 'friend' ? extraContent : ''
-            );
-            if (isPrivate) {
-              await s.bot.sendPrivateMessage(targetId, isApprove ? '已通过' : '已拒绝');
-            }
-          } catch (error) {
-            this.logger.error(`响应处理失败: ${error}`);
-            if (isPrivate) {
-              await s.bot.sendPrivateMessage(targetId, `处理失败: ${error.message || '未知错误'}`);
-            }
-          }
-          return next();
-        });
-        this.pendingRequests.set(requestId, { session, type, disposer });
+        this.pendingRequests.set(requestId, { session, type });
+        this.setupPromptResponse(session, type, requestId, requestNumber, targetId, isPrivate);
       }
       return true;
     } catch (error) {
@@ -380,14 +323,81 @@ export class OnebotRequest {
   }
 
   /**
-   * 注册OneBot事件监听器
-   * 监听好友请求、入群请求、加群请求和入群事件
+   * 使用临时中间件处理人工审核响应
+   */
+  private async setupPromptResponse(
+    session: Session,
+    type: RequestType,
+    requestId: string,
+    requestNumber: number,
+    targetId: string,
+    isPrivate: boolean
+  ) {
+    const helpMsg = `请回复以下命令处理请求 #${requestNumber}：\n通过[y]${requestNumber} [备注] | 拒绝[n]${requestNumber} [理由]`;
+    const sendFunc = isPrivate
+      ? (msg) => session.bot.sendPrivateMessage(targetId, msg)
+      : (msg) => session.bot.sendMessage(targetId, msg);
+    await sendFunc(helpMsg);
+    let disposed = false;
+    const disposer = this.ctx.middleware(async (s, next) => {
+      if (disposed) return next();
+      if (s.userId !== targetId && s.guildId !== targetId) return next();
+      const match = s.content.trim().match(new RegExp(`^(y|n|通过|拒绝)(${requestNumber})\\s*(.*)$`));
+      if (!match) return next();
+      disposed = true;
+      disposer();
+      const isApprove = match[1] === 'y' || match[1] === '通过';
+      const extraContent = match[3]?.trim() || '';
+      this.cleanupRequest(requestId);
+      try {
+        await this.processRequestAction(
+          session,
+          type,
+          isApprove,
+          !isApprove ? extraContent : '',
+          isApprove && type === 'friend' ? extraContent : ''
+        );
+        await sendFunc(`请求 #${requestNumber} 已${isApprove ? '通过' : '拒绝'}${
+          extraContent ? `，${isApprove ? '备注' : '原因'}：${extraContent}` : ''}`);
+      } catch (error) {
+        this.logger.error(`响应处理失败: ${error}`);
+        await sendFunc(`处理请求 #${requestNumber} 失败: ${error.message || '未知错误'}`);
+      }
+    });
+    const timeoutMin = typeof this.config.manualTimeout === 'number' ? this.config.manualTimeout : 60;
+    const timeoutAction = (this.config.manualTimeoutAction === 'accept' || this.config.manualTimeoutAction === 'reject')
+      ? this.config.manualTimeoutAction : 'reject';
+    if (timeoutMin > 0) {
+      setTimeout(async () => {
+        if (disposed) return;
+        disposed = true;
+        disposer();
+        this.cleanupRequest(requestId);
+        try {
+          await this.processRequestAction(
+            session,
+            type,
+            timeoutAction === 'accept',
+            timeoutAction === 'reject' ? '请求处理超时，已自动拒绝' : '',
+          );
+        } catch (e) {
+          this.logger.error(`超时处理失败: ${e}`);
+        }
+        await sendFunc(`请求 #${requestNumber} 超时，已自动${timeoutAction === 'accept' ? '通过' : '拒绝'}`);
+      }, timeoutMin * 60 * 1000);
+    }
+  }
+
+  /**
+   * 注册事件监听器
+   * 监听好友请求、群组请求和群成员请求事件
    */
   public registerEventListeners(): void {
     const handleRequest = (type: RequestType) => async (session: Session) => {
-      session.userId = session.event._data.user_id?.toString();
+      const data = session.event?._data || {};
+      session.userId = (data.user_id || data.userId || session.userId)?.toString();
       if (type !== 'friend') {
-        session.guildId = session.event._data.group_id?.toString() || '';
+        session.guildId = (data.group_id || data.groupId || session.guildId)?.toString() || '';
       }
       await this.processRequest(session, type);
     };

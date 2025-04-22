@@ -22,7 +22,6 @@ export const usage = `
 
 /**
  * 插件配置接口
- * @interface Config
  */
 export interface Config {
   enable?: boolean
@@ -40,18 +39,16 @@ export interface Config {
   GuildAllowUsers?: string[]
   GuildMinMemberCount?: number
   GuildMaxCapacity?: number
-  botId?: string
+  manualTimeout?: number
+  manualTimeoutAction?: Request
 }
 
 // 配置模式
 export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
-    botId: Schema.string()
-      .description('机器人 QQ').required(),
     enable: Schema.boolean()
       .description('开启请求监听').default(true),
   }).description('基础配置'),
-
   Schema.object({
     friendRequest: Schema.union([
       Schema.const('accept').description('同意'),
@@ -71,6 +68,12 @@ export const Config: Schema<Config> = Schema.intersect([
       Schema.const('manual').description('手动'),
       Schema.const('auto').description('自动'),
     ]).description('处理入群邀请').default('reject'),
+    manualTimeout: Schema.number()
+      .description('手动超时时间（分钟）').default(60).min(0),
+    manualTimeoutAction: Schema.union([
+      Schema.const('accept').description('同意'),
+      Schema.const('reject').description('拒绝'),
+  ]).description('超时自动操作').default('reject'),
     enableNotify: Schema.boolean()
       .description('开启请求通知').default(false),
   }).description('请求配置'),
@@ -78,11 +81,10 @@ export const Config: Schema<Config> = Schema.intersect([
     Schema.object({
       enableNotify: Schema.const(true).required(),
       notifyTarget: Schema.string()
-        .description('通知目标(group/private:12345)').default(''),
+        .description('通知目标(guild/private)').default('private:10000'),
     }),
     Schema.object({}),
   ]),
-
   Schema.union([
     Schema.object({
       friendRequest: Schema.const('auto').required(),
@@ -128,9 +130,9 @@ export const Config: Schema<Config> = Schema.intersect([
 ])
 
 /**
- * 插件主函数
- * @param {Context} ctx - Koishi上下文
- * @param {Config} config - 插件配置
+ * 插件主入口
+ * @param ctx Koishi 上下文
+ * @param config 插件配置
  */
 export function apply(ctx: Context, config: Config = {}) {
   const logger = ctx.logger('onebot-manager')
@@ -140,27 +142,30 @@ export function apply(ctx: Context, config: Config = {}) {
     request.registerEventListeners()
   }
 
-  const qmanager = ctx.command('qmanager', '群组管理')
+  const qmanage = ctx.command('qmanage', '群组管理')
 
-  qmanager.subcommand('tag [title:string] [target]', '设置专属头衔')
+  /**
+   * 设置专属头衔
+   */
+  qmanage.subcommand('tag [title:string] [target]', '设置专属头衔')
     .usage('可使用引号添加以空格分隔的内容，如"原神 启动"，总计不能超过 18 字符')
     .action(async ({ session }, title = '', target) => {
-      const botRole = await utils.checkBotPermission(session, config.botId, logger);
+      const botRole = await utils.checkBotPermission(session, logger);
       if (botRole !== 'owner') {
-        const message = await session.send('设置头衔失败: 只有群主可设置专属头衔');
-        utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
+        const msg = await session.send('设置头衔失败: 只有群主可设置头衔');
+        utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
         return;
       }
       try {
         if (title) {
           const titleLength = title.length + (title.match(/[\u4e00-\u9fa5]/g)?.length || 0) * 2;
           if (titleLength > 18) {
-            const message = await session.send('设置头衔失败: 头衔长度超过18个字符');
-            utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
+            const msg = await session.send('设置头衔失败: 头衔长度超过18字符');
+            utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
             return;
           }
         }
-        // 确定目标用户ID
+        // 目标用户ID判定
         let targetId = session.userId;
         if (target) {
           const memberInfo = await session.onebot.getGroupMemberInfo(
@@ -168,78 +173,71 @@ export function apply(ctx: Context, config: Config = {}) {
             Number(session.userId),
             true
           );
-          if (memberInfo?.role === 'member') {
-            const message = await session.send('权限不足: 普通成员只能设置自己的头衔');
-            utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
-          } else {
+          if (memberInfo?.role !== 'member') {
             const parsedId = utils.parseTarget(target);
-            if (parsedId) {
-              targetId = parsedId;
-            } else {
-              const message = await session.send('无效的目标用户');
-              utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
+            if (parsedId) targetId = parsedId;
+            else {
+              const msg = await session.send('无效的目标用户');
+              utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
               return;
             }
           }
         }
-        // 执行设置头衔操作
         await session.onebot.setGroupSpecialTitle(
           Number(session.guildId),
           Number(targetId),
           title
         );
-        // 返回成功信息
         return `已${title ? '将' : '清除'}${targetId === session.userId ? '您' : `用户 ${targetId}`}的头衔${title ? `设置为：${title}` : ''}`;
       } catch (error) {
-        const message = await session.send(`设置头衔失败: ${error.message}`);
-        utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
+        const msg = await session.send(`设置头衔失败: ${error.message}`);
+        utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
       }
     });
 
-  const ess = qmanager.subcommand('essence [messageId:string]', '设置精华消息')
+  /**
+   * 设置精华消息
+   */
+  const ess = qmanage.subcommand('essence [messageId:string]', '设置精华消息')
     .action(async ({ session }, messageId) => {
-      const role = await utils.checkBotPermission(session, config.botId, logger);
+      const role = await utils.checkBotPermission(session, logger);
       if (!role || (role !== 'owner' && role !== 'admin')) {
-        const message = await session.send('设置精华消息失败: 无群管理权限');
-        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
+        const msg = await session.send('设置精华消息失败: 无群管理权限');
+        await utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
         return;
       }
       messageId = messageId || (session.quote?.id || null);
       if (!messageId) {
-        const message = await session.send('请提供消息ID或引用消息');
-        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
+        const msg = await session.send('请提供消息ID或引用消息');
+        await utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
         return;
       }
       try {
         await session.onebot.setEssenceMsg(messageId);
-        return;
       } catch (error) {
-        const message = await session.send(`设置精华消息失败: ${error.message}`);
-        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
-        return;
+        const msg = await session.send(`设置精华消息失败: ${error.message}`);
+        await utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
       }
     });
   ess.subcommand('.del [messageId:string]', '移除精华消息')
     .action(async ({ session }, messageId) => {
-      const role = await utils.checkBotPermission(session, config.botId, logger);
+      const role = await utils.checkBotPermission(session, logger);
       if (!role || (role !== 'owner' && role !== 'admin')) {
-        const message = await session.send('移除精华消息失败: 无群管理权限');
-        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
+        const msg = await session.send('移除精华消息失败: 无群管理权限');
+        await utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
         return;
       }
       messageId = messageId || (session.quote?.id || null);
       if (!messageId) {
-        const message = await session.send('请提供消息ID或引用消息');
-        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
+        const msg = await session.send('请提供消息ID或引用消息');
+        await utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
         return;
       }
       try {
         await session.onebot.deleteEssenceMsg(messageId);
-        return;
       } catch (error) {
-        const message = await session.send(`移除精华消息失败: ${error.message}`);
-        await utils.autoRecall(session, Array.isArray(message) ? message[0] : message);
-        return;
+        const msg = await session.send(`移除精华消息失败: ${error.message}`);
+        await utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
       }
     });
 }
