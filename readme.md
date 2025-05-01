@@ -11,6 +11,13 @@
 - **智能筛选**：根据账号注册时间、QQ等级、会员等级等条件自动决定是否通过请求
 - **群管理**：设置群专属头衔、管理精华消息等实用功能
 
+### OneBot管理工具
+
+- 提供丰富的信息查询功能，包括消息、图片、语音、合并转发等内容
+- 支持查询账号信息、群组信息、成员信息等
+- 提供OneBot实现重启、缓存清理等管理功能
+- 支持获取运行状态和版本信息
+
 ## 配置说明
 
 ```yaml
@@ -38,6 +45,28 @@ GuildAllowUsers: []       # 邀请ID白名单
 GuildMinMemberCount: -1   # 最低群成员数量（-1表示不启用此条件）
 GuildMaxCapacity: -1      # 最低群容量要求（-1表示不启用此条件）
 ```
+
+## OneBot命令
+
+| 命令 | 说明 | 示例 |
+|-----|------|------|
+| `onebot.restart` | 重启 OneBot | `onebot.restart` |
+| `onebot.clean` | 清理缓存 | `onebot.clean` |
+| `get` | 获取消息内容及状态 | `get -i 1234567890` |
+| `get.forward` | 获取合并转发内容 | `get.forward -i 1234567890` |
+| `get.record` | 获取语音文件 | `get.record -f 1234.silk -t mp3` |
+| `get.image` | 获取图片文件 | `get.image -f abc.image` |
+| `get.stat` | 获取运行状态 | `get.stat` |
+| `get.ver` | 获取版本信息 | `get.ver` |
+| `get.csrf` | 获取相关接口凭证 | `get.csrf qun.qq.com` |
+| `info` | 查询账号信息 | `info` |
+| `info.user` | 查询其它账号信息 | `info.user 123456 -n` |
+| `info.friend` | 获取本账号好友列表 | `info.friend` |
+| `info.group` | 获取本账号群组列表 | `info.group` |
+| `group` | 查询群信息 | `group 123456 -n` |
+| `group.user` | 查询群成员信息 | `group.user 123456 654321 -n` |
+| `group.list` | 获取群成员列表 | `group.list 123456` |
+| `group.honor` | 查询群荣誉信息 | `group.honor 123456 -t talkative` |
 
 ### 自动处理规则说明
 

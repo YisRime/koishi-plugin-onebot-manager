@@ -2,6 +2,9 @@ import { Context, Schema } from 'koishi'
 import {} from "koishi-plugin-adapter-onebot";
 import { OnebotRequest, Request } from './request'
 import { utils } from './utils'
+import { registerTool } from './tool'
+import { registerAdmin } from './admin'
+import { Onebot } from './onebot'
 
 export const name = 'onebot-manager'
 export const inject = { optional: ['database'] }
@@ -21,7 +24,7 @@ export const usage = `
 `
 
 /**
- * 插件配置接口
+ * 插件配置项
  */
 export interface Config {
   enable?: boolean
@@ -43,11 +46,12 @@ export interface Config {
   manualTimeoutAction?: Request
 }
 
-// 配置模式
+/**
+ * 插件配置 Schema
+ */
 export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
-    enable: Schema.boolean()
-      .description('开启请求监听').default(true),
+    enable: Schema.boolean().description('开启请求监听').default(true),
   }).description('基础配置'),
   Schema.object({
     friendRequest: Schema.union([
@@ -80,42 +84,33 @@ export const Config: Schema<Config> = Schema.intersect([
   Schema.union([
     Schema.object({
       enableNotify: Schema.const(true).required(),
-      notifyTarget: Schema.string()
-        .description('通知目标(guild/private)').default('private:10000'),
+      notifyTarget: Schema.string().description('通知目标(guild/private)').default('private:10000'),
     }),
     Schema.object({}),
   ]),
   Schema.union([
     Schema.object({
       friendRequest: Schema.const('auto').required(),
-      FriendRegTime: Schema.number()
-        .description('最短注册年份').default(-1).min(-1),
-      FriendLevel: Schema.number()
-        .description('最低QQ等级').default(-1).min(-1).max(256),
-      FriendVipLevel: Schema.number()
-        .description('最低会员等级').default(-1).min(-1).max(10),
+      FriendRegTime: Schema.number().description('最短注册年份').default(-1).min(-1),
+      FriendLevel: Schema.number().description('最低QQ等级').default(-1).min(-1).max(256),
+      FriendVipLevel: Schema.number().description('最低会员等级').default(-1).min(-1).max(10),
     }).description('好友请求通过配置'),
     Schema.object({}),
   ]),
   Schema.union([
     Schema.object({
       memberRequest: Schema.const('auto').required(),
-      MemberRegTime: Schema.number()
-        .description('最短注册年份').default(-1).min(-1),
-      MemberLevel: Schema.number()
-        .description('最低QQ等级').default(-1).min(-1).max(256),
-      MemberVipLevel: Schema.number()
-        .description('最低会员等级').default(-1).min(-1).max(10),
+      MemberRegTime: Schema.number().description('最短注册年份').default(-1).min(-1),
+      MemberLevel: Schema.number().description('最低QQ等级').default(-1).min(-1).max(256),
+      MemberVipLevel: Schema.number().description('最低会员等级').default(-1).min(-1).max(10),
     }).description('加群请求通过配置'),
     Schema.object({}),
   ]),
   Schema.union([
     Schema.object({
       guildRequest: Schema.const('auto').required(),
-      GuildAllowUsers: Schema.array(String)
-        .description('白名单邀请人ID').default([]),
-      GuildMinMemberCount: Schema.number()
-        .description('最低群成员数量').default(-1).min(-1).max(3000),
+      GuildAllowUsers: Schema.array(String).description('白名单邀请人ID').default([]),
+      GuildMinMemberCount: Schema.number().description('最低群成员数量').default(-1).min(-1).max(3000),
       GuildMaxCapacity: Schema.union([
         Schema.const(-1).description('不限制'),
         Schema.const(200).description('200'),
@@ -142,102 +137,11 @@ export function apply(ctx: Context, config: Config = {}) {
     request.registerEventListeners()
   }
 
-  const qmanage = ctx.command('qmanage', '群组管理')
+  const qgroup = ctx.command('qgroup', 'QQ 群管')
+    .usage('QQ 群管，仅群主或管理员可用')
 
-  /**
-   * 设置专属头衔
-   */
-  qmanage.subcommand('tag [title:string] [target]', '设置专属头衔')
-    .usage('可使用引号添加以空格分隔的内容，如"原神 启动"，总计不能超过 18 字符')
-    .action(async ({ session }, title = '', target) => {
-      const botRole = await utils.checkBotPermission(session, logger);
-      if (botRole !== 'owner') {
-        const msg = await session.send('设置头衔失败: 只有群主可设置头衔');
-        utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
-        return;
-      }
-      try {
-        if (title) {
-          const titleLength = title.length + (title.match(/[\u4e00-\u9fa5]/g)?.length || 0) * 2;
-          if (titleLength > 18) {
-            const msg = await session.send('设置头衔失败: 头衔长度超过18字符');
-            utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
-            return;
-          }
-        }
-        // 目标用户ID判定
-        let targetId = session.userId;
-        if (target) {
-          const memberInfo = await session.onebot.getGroupMemberInfo(
-            Number(session.guildId),
-            Number(session.userId),
-            true
-          );
-          if (memberInfo?.role !== 'member') {
-            const parsedId = utils.parseTarget(target);
-            if (parsedId) targetId = parsedId;
-            else {
-              const msg = await session.send('无效的目标用户');
-              utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
-              return;
-            }
-          }
-        }
-        await session.onebot.setGroupSpecialTitle(
-          Number(session.guildId),
-          Number(targetId),
-          title
-        );
-        return `已${title ? '将' : '清除'}${targetId === session.userId ? '您' : `用户 ${targetId}`}的头衔${title ? `设置为：${title}` : ''}`;
-      } catch (error) {
-        const msg = await session.send(`设置头衔失败: ${error.message}`);
-        utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
-      }
-    });
-
-  /**
-   * 设置精华消息
-   */
-  const ess = qmanage.subcommand('essence [messageId:string]', '设置精华消息')
-    .action(async ({ session }, messageId) => {
-      const role = await utils.checkBotPermission(session, logger);
-      if (!role || (role !== 'owner' && role !== 'admin')) {
-        const msg = await session.send('设置精华消息失败: 无群管理权限');
-        await utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
-        return;
-      }
-      messageId = messageId || (session.quote?.id || null);
-      if (!messageId) {
-        const msg = await session.send('请提供消息ID或引用消息');
-        await utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
-        return;
-      }
-      try {
-        await session.onebot.setEssenceMsg(messageId);
-      } catch (error) {
-        const msg = await session.send(`设置精华消息失败: ${error.message}`);
-        await utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
-      }
-    });
-  ess.subcommand('.del [messageId:string]', '移除精华消息')
-    .action(async ({ session }, messageId) => {
-      const role = await utils.checkBotPermission(session, logger);
-      if (!role || (role !== 'owner' && role !== 'admin')) {
-        const msg = await session.send('移除精华消息失败: 无群管理权限');
-        await utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
-        return;
-      }
-      messageId = messageId || (session.quote?.id || null);
-      if (!messageId) {
-        const msg = await session.send('请提供消息ID或引用消息');
-        await utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
-        return;
-      }
-      try {
-        await session.onebot.deleteEssenceMsg(messageId);
-      } catch (error) {
-        const msg = await session.send(`移除精华消息失败: ${error.message}`);
-        await utils.autoRecall(session, Array.isArray(msg) ? msg[0] : msg);
-      }
-    });
+  const onebotService = new Onebot(ctx)
+  onebotService.registerCommands(qgroup)
+  registerTool(qgroup, logger, utils)
+  registerAdmin(qgroup, logger, utils)
 }
