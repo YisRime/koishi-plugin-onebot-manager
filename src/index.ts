@@ -2,8 +2,7 @@ import { Context, Schema } from 'koishi'
 import {} from "koishi-plugin-adapter-onebot";
 import { OnebotRequest, Request } from './request'
 import { utils } from './utils'
-import { registerTool } from './tool'
-import { registerAdmin } from './admin'
+import { registerCommands } from './command'
 import { Onebot } from './onebot'
 
 export const name = 'onebot-manager'
@@ -15,7 +14,6 @@ export const usage = `
   <p>📖 <strong>使用文档</strong>：请点击左上角的 <strong>插件主页</strong> 查看插件使用文档</p>
   <p>🔍 <strong>更多插件</strong>：可访问 <a href="https://github.com/YisRime" style="color:#4a6ee0;text-decoration:none;">苡淞的 GitHub</a> 查看本人的所有插件</p>
 </div>
-
 <div style="border-radius: 10px; border: 1px solid #ddd; padding: 16px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
   <h2 style="margin-top: 0; color: #e0574a;">❤️ 支持与反馈</h2>
   <p>🌟 喜欢这个插件？请在 <a href="https://github.com/YisRime" style="color:#e0574a;text-decoration:none;">GitHub</a> 上给我一个 Star！</p>
@@ -23,9 +21,6 @@ export const usage = `
 </div>
 `
 
-/**
- * 插件配置项
- */
 export interface Config {
   enable?: boolean
   enableNotify?: boolean
@@ -46,9 +41,6 @@ export interface Config {
   manualTimeoutAction?: Request
 }
 
-/**
- * 插件配置 Schema
- */
 export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
     enable: Schema.boolean().description('开启请求监听').default(true),
@@ -124,24 +116,11 @@ export const Config: Schema<Config> = Schema.intersect([
   ]),
 ])
 
-/**
- * 插件主入口
- * @param ctx Koishi 上下文
- * @param config 插件配置
- */
 export function apply(ctx: Context, config: Config = {}) {
   const logger = ctx.logger('onebot-manager')
-
-  if (config.enable !== false) {
-    const request = new OnebotRequest(ctx, logger, config)
-    request.registerEventListeners()
-  }
-
-  const qgroup = ctx.command('qgroup', 'QQ 群管')
-    .usage('QQ 群管，仅群主或管理员可用')
-
-  const onebotService = new Onebot(ctx)
-  onebotService.registerCommands(qgroup)
-  registerTool(qgroup, logger, utils)
-  registerAdmin(qgroup, logger, utils)
+  if (config.enable !== false)
+    new OnebotRequest(ctx, logger, config).registerEventListeners()
+  const qgroup = ctx.command('qgroup', 'QQ 群管').usage('QQ 群管，仅群主或管理员可用')
+  new Onebot().registerCommands(qgroup)
+  registerCommands(qgroup, logger, utils)
 }

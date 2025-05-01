@@ -1,12 +1,9 @@
-import { Context } from 'koishi'
 import { utils } from './utils'
 
 /**
- * Onebot 服务类，封装 Onebot 相关命令注册与格式化工具
+ * Onebot 服务类，封装 Onebot 相关命令与工具
  */
 export class Onebot {
-  constructor(private ctx: Context) {}
-
   static sexMap = {
     'male': '男',
     'female': '女'
@@ -230,7 +227,7 @@ export class Onebot {
           return JSON.stringify(msg, null, 2)
         } catch (e) { return utils.handleError(session, e) }
       })
-    get.subcommand('.record', '获取语音文件')
+    get.subcommand('.record', '获取语音文件', { authority: 2 })
       .usage('获取指定语音文件并转换格式')
       .option('file', '-f <file:string> 文件名', { type: 'string' })
       .option('format', '-t <format:string> 转换格式 (mp3/amr/wma/m4a/spx/ogg/wav/flac)', { fallback: 'mp3' })
@@ -242,7 +239,7 @@ export class Onebot {
           return `语音文件路径: ${result.file}`
         } catch (e) { return utils.handleError(session, e) }
       })
-    get.subcommand('.image', '获取图片文件')
+    get.subcommand('.image', '获取图片文件', { authority: 2 })
       .usage('获取指定图片文件的本地路径')
       .option('file', '-f <file:string> 文件名', { type: 'string' })
       .action(async ({ session, options }) => {
@@ -253,7 +250,7 @@ export class Onebot {
           return `图片文件路径: ${result.file}`
         } catch (e) { return utils.handleError(session, e) }
       })
-    get.subcommand('.file', '获取文件信息')
+    get.subcommand('.file', '获取文件信息', { authority: 2 })
       .usage('获取指定文件ID对应的文件信息')
       .option('id', '-i <id:string> 文件ID')
       .action(async ({ session, options }) => {
