@@ -5,8 +5,7 @@ import { Command, Logger } from 'koishi'
  */
 const adminAction = (enable: boolean, logger: Logger, utils: any) =>
   ({ session }, target) => utils.withRoleCheck(
-    session, logger, ['owner'], ['owner', 'admin'],
-    `${enable ? '设置' : '取消'}管理失败: 仅群主可操作管理`,
+    session, logger, ['owner'], ['owner', 'admin'], `${enable ? '设置' : '取消'}管理失败: 需要群管权限`,
     async () => {
       let targetId = target ? utils.parseTarget(target) : session.userId
       if (String(targetId) === String(session.userId) && !target)
@@ -38,7 +37,7 @@ export function registerAdmin(qgroup: Command, logger: Logger, utils: any) {
     .option('cancel', '-c, --cancel 取消禁言')
     .usage('禁言指定成员，默认 30 分钟')
     .action(({ session, options }, target, duration) => utils.withRoleCheck(
-      session, logger, ['owner', 'admin'], ['owner', 'admin'], '禁言失败: 无群管权限',
+      session, logger, ['owner', 'admin'], ['owner', 'admin'], '禁言失败: 需要群管权限',
       async () => {
         let targetId = utils.parseTarget(target)
         if (!targetId) return utils.handleError(session, new Error('请指定成员'))
@@ -56,7 +55,7 @@ export function registerAdmin(qgroup: Command, logger: Logger, utils: any) {
   mute.subcommand('.all [enable:boolean]', '全体禁言')
     .usage('开启或关闭全体禁言')
     .action(({ session }, enable) => utils.withRoleCheck(
-      session, logger, ['owner', 'admin'], ['owner', 'admin'], '全体禁言失败: 无群管权限',
+      session, logger, ['owner', 'admin'], ['owner', 'admin'], '全体禁言失败: 需要群管权限',
       async () => {
         let val = typeof enable === 'boolean' ? enable : true
         try {
@@ -73,7 +72,7 @@ export function registerAdmin(qgroup: Command, logger: Logger, utils: any) {
     .usage('逐出指定成员，使用 -r 拒绝此人再次加群')
     .action(({ session, options }, target) => utils.withRoleCheck(
       session, logger, ['owner', 'admin'], ['owner', 'admin'],
-      '逐出成员失败: 无群管权限',
+      '逐出成员失败: 需要群管权限',
       async () => {
         let targetId = utils.parseTarget(target)
         if (!targetId) return utils.handleError(session, new Error('请指定成员'))
