@@ -63,9 +63,9 @@ export const utils = {
   withRoleCheck(session, logger, requiredBotRoles, requiredUserRoles, failMsg, fn) {
     return async (...args) => {
       const { bot, user } = await utils.checkPermission(session, logger);
-      if (!bot || !requiredBotRoles.includes(bot))
+      if (requiredBotRoles.length > 0 && (!bot || !requiredBotRoles.includes(bot)))
         return utils.handleError(session, new Error('无群管权限'));
-      if (!user || !requiredUserRoles.includes(user))
+      if (requiredUserRoles.length > 0 && (!user || !requiredUserRoles.includes(user)))
         return utils.handleError(session, new Error(failMsg));
       return fn(...args);
     }
