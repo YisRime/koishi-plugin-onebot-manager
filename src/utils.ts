@@ -1,5 +1,9 @@
 import { Session, h, Logger } from 'koishi';
 
+// 角色映射常量
+const ROLE_MAP = { owner: '群主', admin: '管理员', member: '成员' };
+const getRoleName = (role: string) => role ? (ROLE_MAP[role] || role) : '未知';
+
 export const utils = {
   /**
    * 解析目标字符串，返回QQ号或null。
@@ -22,8 +26,8 @@ export const utils = {
    * @param prefix 消息前缀
    * @returns Promise<null>
    */
-  handleError(session: Session, error: any, prefix = '操作失败:') {
-    return session.send(`${prefix} ${error?.message || error}`).then(msg => {
+  handleError(session: Session, error: any) {
+    return session.send(`${error?.message || error}`).then(msg => {
       if (typeof msg === 'string')
         setTimeout(() => session.bot.deleteMessage(session.channelId, msg).catch(() => {}), 10000);
       return null;
@@ -56,18 +60,31 @@ export const utils = {
    * @param logger 日志对象
    * @param requiredBotRoles 机器人所需角色
    * @param requiredUserRoles 用户所需角色
-   * @param failMsg 权限不足时的提示
    * @param fn 被包装的函数
    * @returns 包装后的异步函数
    */
-  withRoleCheck(session, logger, requiredBotRoles, requiredUserRoles, failMsg, fn) {
-    return async (...args) => {
+  withRoleCheck<T extends any[], R>(session: Session, logger: Logger, requiredBotRoles: string[] = [],
+    requiredUserRoles: string[] = [], fn: (...args: T) => Promise<R>) {
+    return async (...args: T): Promise<R | null> => {
       const { bot, user } = await utils.checkPermission(session, logger);
-      if (requiredBotRoles.length > 0 && (!bot || !requiredBotRoles.includes(bot)))
-        return utils.handleError(session, new Error('无群管权限'));
-      if (requiredUserRoles.length > 0 && (!user || !requiredUserRoles.includes(user)))
-        return utils.handleError(session, new Error(failMsg));
+      // 检查权限并构建错误消息
+      const checkRole = (role: string | null, required: string[], subject: string) => {
+        if (required.length && (!role || !required.includes(role))) {
+          const requiredNames = required.map(getRoleName).join('或');
+          const currentName = getRoleName(role);
+          return `${subject}需要${requiredNames}（当前为${currentName}）`;
+        }
+        return null;
+      };
+      // 依次检查权限
+      const botError = checkRole(bot, requiredBotRoles, '');
+      const userError = checkRole(user, requiredUserRoles, '用户');
+      // 合并显示错误
+      if (botError || userError) {
+        const errors = [botError, userError].filter(Boolean).join('；');
+        return utils.handleError(session, `权限不足：${errors}`);
+      }
       return fn(...args);
-    }
+    };
   }
 }

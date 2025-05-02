@@ -48,26 +48,28 @@ function getTargetId(target: any, session: any, utils: any, groupId: number, rol
 /**
  * 群管理设置/取消操作
  * @param {boolean} set - 是否设置为管理
+ * @param {any} utils - 工具对象
+ * @param {Logger} logger - 日志对象
  * @returns {Function} 命令处理函数
  */
-function adminAction(set: boolean) {
-  return async ({ session, options }, target) => session.app.pluginExports.utils.withRoleCheck(
-    session, session.app.pluginExports.logger, ['owner'], ['owner', 'admin'], '需要群管权限',
-    async () => {
-      const groupId = getGroupId(options, session)
-      const targetId = target ? session.app.pluginExports.utils.parseTarget(target) : session.userId
-      if (String(targetId) === String(session.userId) && !target)
-        return session.app.pluginExports.utils.handleError(session, new Error('请指定成员'))
-      try {
-        await session.onebot.setGroupAdmin(groupId, Number(targetId), set)
-        return set
-          ? `已设置成员 ${targetId} 为管理`
-          : `已取消成员 ${targetId} 的管理`
-      } catch (error) {
-        return session.app.pluginExports.utils.handleError(session, error)
+function adminAction(set: boolean, utils: any, logger: Logger) {
+  return async ({ session, options }, target) => {
+    if (!target) return utils.handleError(session, new Error('请指定成员'))
+    return utils.withRoleCheck(session, logger, ['owner'], ['owner', 'admin'],
+      async () => {
+        const groupId = getGroupId(options, session)
+        const targetId = target ? utils.parseTarget(target) : session.userId
+        try {
+          await session.onebot.setGroupAdmin(groupId, Number(targetId), set)
+          return set
+            ? `已设置成员 ${targetId} 为管理`
+            : `已取消成员 ${targetId} 的管理`
+        } catch (error) {
+          return utils.handleError(session, error)
+        }
       }
-    }
-  )
+    )
+  }
 }
 
 /**
@@ -81,8 +83,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置或清除指定成员的群头衔\n使用引号添加不连续的内容，最多18字符\n英文(标点)和数字1字符，中文和其他符号3字符，Emoji6字符')
     .action(async ({ session, options }, title = '', target) =>
-      utils.withRoleCheck(
-        session, logger, !target ? [] : ['owner', 'admin'], ['owner'], '需要群管权限',
+      utils.withRoleCheck(session, logger, ['owner'], [],
         async () => {
           if (title && getTitleLen(title) > 18)
             return utils.handleError(session, new Error('设置头衔失败: 长度超过18字符'));
@@ -98,11 +99,10 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
       )()
     )
 
-  qgroup.subcommand('card [card:string] [target]', '设置群名片')
+  qgroup.subcommand('membercard [card:string] [target]', '设置群名片')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置或清除指定成员的群名片')
-    .action(async ({ session, options }, card = '', target) => utils.withRoleCheck(
-      session, logger, ['owner', 'admin'], ['owner', 'admin'], '需要群管权限',
+    .action(async ({ session, options }, card = '', target) => utils.withRoleCheck(session, logger, ['owner', 'admin'], ['owner', 'admin'],
       async () => {
         const groupId = getGroupId(options, session)
         const targetId = await getTargetId(target, session, utils, groupId, !!target)
@@ -115,11 +115,10 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
       }
     )())
 
-  qgroup.subcommand('gname <group_name:string>', '设置群名')
+  qgroup.subcommand('groupname <group_name:string>', '设置群名')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置当前群的群名')
-    .action(({ session, options }, group_name) => utils.withRoleCheck(
-      session, logger, ['owner', 'admin'], ['owner', 'admin'], '需要群管权限',
+    .action(({ session, options }, group_name) => utils.withRoleCheck(session, logger, ['owner', 'admin'], ['owner', 'admin'],
       async () => {
         if (!group_name) return utils.handleError(session, new Error('请输入群名'))
         try {
@@ -134,8 +133,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
   const essenceCmd = qgroup.subcommand('essence [messageId:string]', '设置精华消息')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置指定消息为精华消息')
-    .action(({ session }, messageId) => utils.withRoleCheck(
-      session, logger, ['owner', 'admin'], ['owner', 'admin'], '需要群管权限',
+    .action(({ session }, messageId) => utils.withRoleCheck(session, logger, ['owner', 'admin'], ['owner', 'admin'],
       async () => {
         messageId = messageId || session.quote?.id
         if (!messageId) return utils.handleError(session, new Error('请提供消息ID或引用消息'))
@@ -150,8 +148,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
   essenceCmd.subcommand('.del [messageId:string]', '移除精华消息')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('移除指定消息的精华消息')
-    .action(({ session }, messageId) => utils.withRoleCheck(
-      session, logger, ['owner', 'admin'], ['owner', 'admin'], '需要群管权限',
+    .action(({ session }, messageId) => utils.withRoleCheck(session, logger, ['owner', 'admin'], ['owner', 'admin'],
       async () => {
         messageId = messageId || session.quote?.id
         if (!messageId) return utils.handleError(session, new Error('请提供消息ID或引用消息'))
@@ -167,18 +164,17 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
   const admin = qgroup.subcommand('admin <target>', '设置群管理')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置指定成员为群管理')
-    .action(adminAction(true))
+    .action(adminAction(true, utils, logger))
   admin.subcommand('.del <target>', '取消群管理')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('取消指定成员的群管理')
-    .action(adminAction(false))
+    .action(adminAction(false, utils, logger))
 
   const mute = qgroup.subcommand('mute <target> [duration]', '禁言群成员')
     .option('cancel', '-c, --cancel 取消禁言')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('禁言指定成员，默认 30 分钟')
-    .action(({ session, options }, target, duration) => utils.withRoleCheck(
-      session, logger, ['owner', 'admin'], ['owner', 'admin'], '需要群管权限',
+    .action(({ session, options }, target, duration) => utils.withRoleCheck(session, logger, ['owner', 'admin'], ['owner', 'admin'],
       async () => {
         const targetId = utils.parseTarget(target)
         if (!targetId) return utils.handleError(session, new Error('请指定成员'))
@@ -196,8 +192,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
   mute.subcommand('.all [enable:boolean]', '全体禁言')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('开启或关闭全体禁言')
-    .action(({ session, options }, enable) => utils.withRoleCheck(
-      session, logger, ['owner', 'admin'], ['owner', 'admin'], '需要群管权限',
+    .action(({ session, options }, enable) => utils.withRoleCheck(session, logger, ['owner', 'admin'], ['owner', 'admin'],
       async () => {
         const val = typeof enable === 'boolean' ? enable : true
         try {
@@ -213,8 +208,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     .option('reject', '-r, --reject 拒绝再次加群')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('逐出指定成员，使用 -r 拒绝此人再次加群')
-    .action(({ session, options }, target) => utils.withRoleCheck(
-      session, logger, ['owner', 'admin'], ['owner', 'admin'], '需要群管权限',
+    .action(({ session, options }, target) => utils.withRoleCheck(session, logger, ['owner', 'admin'], ['owner', 'admin'],
       async () => {
         const targetId = utils.parseTarget(target)
         if (!targetId) return utils.handleError(session, new Error('请指定成员'))
@@ -230,8 +224,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
   qgroup.subcommand('revoke', '撤回消息')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('撤回指定的回复消息')
-    .action(({ session }) => utils.withRoleCheck(
-      session, logger, ['owner', 'admin'], ['owner', 'admin'], '需要群管权限',
+    .action(({ session }) => utils.withRoleCheck(session, logger, ['owner', 'admin'], ['owner', 'admin'],
       async () => {
         const messageId = session.quote?.id
         if (!messageId) return utils.handleError(session, new Error('请回复需要撤回的消息'))
