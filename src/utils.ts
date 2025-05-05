@@ -2,30 +2,28 @@ import { Session, h, Logger } from 'koishi';
 
 // 角色映射常量
 const ROLE_MAP = { owner: '群主', admin: '管理员', member: '成员' };
-const getRoleName = (role: string) => role ? (ROLE_MAP[role] || role) : '未知';
+const getRoleName = (role: string) => ROLE_MAP[role] || role || '未知';
 
 export const utils = {
   /**
-   * 解析目标字符串，返回QQ号或null。
-   * @param target 目标字符串
-   * @returns QQ号字符串或null
+   * 解析目标字符串，返回QQ号或null
    */
   parseTarget(target: string): string | null {
     if (!target) return null;
     try {
+      // 尝试解析@标记
       const at = h.select(h.parse(target), 'at')[0]?.attrs?.id;
       if (at && !isNaN(Number(at))) return at;
-    } catch {}
-    const match = target.match(/@?(\d{5,10})/)?.[1];
-    if (match && !isNaN(Number(match))) return match;
-    return null;
+      // 尝试匹配QQ号
+      const match = target.match(/@?(\d{5,10})/)?.[1];
+      return match && !isNaN(Number(match)) ? match : null;
+    } catch {
+      return null;
+    }
   },
 
   /**
-   * 处理错误并发送提示消息，10秒后自动撤回。
-   * @param session 会话对象
-   * @param error 错误对象或消息
-   * @returns Promise<null>
+   * 处理错误并发送提示消息
    */
   handleError(session: Session, error: any) {
     const errorMsg = error?.message || String(error);
@@ -37,17 +35,14 @@ export const utils = {
   },
 
   /**
-   * 检查机器人和用户在群内的权限角色。
-   * @param session 会话对象
-   * @param logger 日志对象
-   * @returns Promise<{ bot: string | null, user: string | null }>
+   * 检查机器人和用户在群内的权限角色
    */
   async checkPermission(session: Session, logger?: Logger) {
     if (!session.guildId) return { bot: null, user: null };
     try {
       const [bot, user] = await Promise.all([
         session.onebot.getGroupMemberInfo(+session.guildId, +session.selfId, true),
-        session.onebot.getGroupMemberInfo(+session.guildId, +session.userId, true),
+        session.onebot.getGroupMemberInfo(+session.guildId, +session.userId, true)
       ]);
       return { bot: bot?.role ?? null, user: user?.role ?? null };
     } catch (e) {
@@ -57,36 +52,25 @@ export const utils = {
   },
 
   /**
-   * 包装函数，执行前检查机器人和用户的群权限。
-   * @param session 会话对象
-   * @param logger 日志对象
-   * @param requiredBotRoles 机器人所需角色
-   * @param requiredUserRoles 用户所需角色
-   * @param fn 被包装的函数
-   * @returns 包装后的异步函数
+   * 包装函数，执行前检查机器人和用户的群权限
    */
   withRoleCheck<T extends any[], R>(session: Session, logger: Logger, requiredBotRoles: string[] = [],
     requiredUserRoles: string[] = [], fn: (...args: T) => Promise<R>) {
-    return async (...args: T): Promise<R | null> => {
-      const { bot, user } = await utils.checkPermission(session, logger);
-      // 检查权限并构建错误消息
-      const checkRole = (role: string | null, required: string[], subject: string) => {
-        if (required.length && (!role || !required.includes(role))) {
-          const requiredNames = required.map(getRoleName).join('或');
-          const currentName = getRoleName(role);
-          return `${subject}需要${requiredNames}（当前为${currentName}）`;
+    return (...args: T): Promise<R | null> =>
+      utils.checkPermission(session, logger).then(({ bot, user }) => {
+        // 检查权限并构建错误列表
+        const errors = [];
+        // 检查机器人权限
+        if (requiredBotRoles.length && (!bot || !requiredBotRoles.includes(bot))) {
+          errors.push(`需要${requiredBotRoles.map(getRoleName).join('或')}（当前为${getRoleName(bot)}）`);
         }
-        return null;
-      };
-      // 依次检查权限
-      const botError = checkRole(bot, requiredBotRoles, '');
-      const userError = checkRole(user, requiredUserRoles, '用户');
-      // 合并显示错误
-      if (botError || userError) {
-        const errors = [botError, userError].filter(Boolean).join('；');
-        return utils.handleError(session, `权限不足：${errors}`);
-      }
-      return fn(...args);
-    };
+        // 检查用户权限
+        if (requiredUserRoles.length && (!user || !requiredUserRoles.includes(user))) {
+          errors.push(`用户需要${requiredUserRoles.map(getRoleName).join('或')}（当前为${getRoleName(user)}）`);
+        }
+        // 如有错误则返回
+        if (errors.length) return utils.handleError(session, `权限不足：${errors.join('；')}`);
+        return fn(...args);
+      });
   }
 }
