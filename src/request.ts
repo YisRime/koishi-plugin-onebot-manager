@@ -196,7 +196,13 @@ export class OnebotRequest {
       const eventData = session.event?._data || {};
       if (!approve && type === 'guild' &&
           (session.event?.type === 'guild-added' || eventData.notice_type === 'group_increase')) {
-        if (reason) await session.bot.sendMessage(session.guildId, `机器人将退出该群${reason}`);
+        if (reason) {
+          try {
+            await session.bot.sendMessage(session.guildId, `将退出该群 ${reason}`);
+          } catch (error) {
+            this.logger.warn(`发送退群通知失败: ${error}`);
+          }
+        }
         try { await session.onebot.setGroupLeave(Number(session.guildId), false); return true; }
         catch (error) { this.logger.error(`退出群组 ${session.guildId} 失败: ${error}`); return false; }
       }
