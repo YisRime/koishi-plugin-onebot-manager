@@ -24,9 +24,14 @@ function getTitleLen(title: string) {
  * @param {any} options - 命令选项
  * @param {any} session - 会话对象
  * @returns {number} 群号
+ * @throws {Error} 当无法获取有效群号时抛出
  */
-function getGroupId(options: any, session: any) {
-  return options.group ? Number(options.group) : Number(session.guildId)
+function getGroupId(options: any, session: any): number {
+  const groupId = options.group ? Number(options.group) : Number(session.guildId);
+  if (isNaN(groupId) || groupId <= 0) {
+    throw new Error('无效群号');
+  }
+  return groupId;
 }
 
 /**
@@ -36,13 +41,24 @@ function getGroupId(options: any, session: any) {
  * @param {any} utils - 工具对象
  * @param {number} groupId - 群号
  * @param {boolean} [roleCheck=false] - 是否检查权限
- * @returns {Promise<string|number>} 目标成员ID
+ * @returns {Promise<string>} 目标成员ID
+ * @throws {Error} 当无法获取有效成员ID时抛出
  */
-function getTargetId(target: any, session: any, utils: any, groupId: number, roleCheck = false) {
-  if (!target) return session.userId
-  if (!roleCheck) return utils.parseTarget(target)
-  return session.onebot.getGroupMemberInfo(groupId, Number(session.userId), true)
-    .then((info: any) => info?.role !== 'member' ? utils.parseTarget(target) : session.userId)
+async function getTargetId(target: any, session: any, utils: any, groupId: number, roleCheck = false): Promise<string> {
+  if (!target) return session.userId;
+  if (!roleCheck) {
+    const parsed = utils.parseTarget(target);
+    if (!parsed) throw new Error('无效的成员ID');
+    return parsed;
+  }
+  try {
+    const info = await session.onebot.getGroupMemberInfo(groupId, Number(session.userId), true);
+    const parsed = utils.parseTarget(target);
+    if (!parsed) throw new Error('无效的成员ID');
+    return info?.role !== 'member' ? parsed : session.userId;
+  } catch (error) {
+    throw new Error('获取成员信息失败');
+  }
 }
 
 /**
@@ -87,13 +103,14 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
         async () => {
           if (title && getTitleLen(title) > 18)
             return utils.handleError(session, new Error('设置头衔失败: 长度超过18字符'));
-          const groupId = getGroupId(options, session)
-          const targetId = await getTargetId(target, session, utils, groupId, !!target)
           try {
-            await session.onebot.setGroupSpecialTitle(groupId, Number(targetId), title)
-            return `已${title ? '将' : '清除'}${targetId === session.userId ? '您' : `用户 ${targetId}`}的头衔${title ? `设置为：${title}` : ''}`
+            const groupId = getGroupId(options, session);
+            const targetId = await getTargetId(target, session, utils, groupId, !!target);
+            if (!targetId) return utils.handleError(session, new Error('无效的成员ID'));
+            await session.onebot.setGroupSpecialTitle(groupId, Number(targetId), title);
+            return `已${title ? '将' : '清除'}${targetId === session.userId ? '您' : `用户 ${targetId}`}的头衔${title ? `设置为：${title}` : ''}`;
           } catch (error) {
-            return utils.handleError(session, error)
+            return utils.handleError(session, error);
           }
         }
       )()
@@ -104,13 +121,14 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     .usage('设置或清除指定成员的群名片')
     .action(async ({ session, options }, card = '', target) => utils.withRoleCheck(session, logger, ['owner', 'admin'], ['owner', 'admin'],
       async () => {
-        const groupId = getGroupId(options, session)
-        const targetId = await getTargetId(target, session, utils, groupId, !!target)
         try {
-          await session.onebot.setGroupCard(groupId, Number(targetId), card)
-          return `已${card ? '将' : '清除'}${targetId === session.userId ? '您' : `用户 ${targetId}`}的群名片${card ? `设置为：${card}` : ''}`
+          const groupId = getGroupId(options, session);
+          const targetId = await getTargetId(target, session, utils, groupId, !!target);
+          if (!targetId) return utils.handleError(session, new Error('无效的成员ID'));
+          await session.onebot.setGroupCard(groupId, Number(targetId), card);
+          return `已${card ? '将' : '清除'}${targetId === session.userId ? '您' : `用户 ${targetId}`}的群名片${card ? `设置为：${card}` : ''}`;
         } catch (error) {
-          return utils.handleError(session, error)
+          return utils.handleError(session, error);
         }
       }
     )())
@@ -120,12 +138,13 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     .usage('设置当前群的群名')
     .action(({ session, options }, group_name) => utils.withRoleCheck(session, logger, ['owner', 'admin'], ['owner', 'admin'],
       async () => {
-        if (!group_name) return utils.handleError(session, new Error('请输入群名'))
+        if (!group_name) return utils.handleError(session, new Error('请输入群名'));
         try {
-          await session.onebot.setGroupName(getGroupId(options, session), group_name)
-          return `已将群名设置为：${group_name}`
+          const groupId = getGroupId(options, session);
+          await session.onebot.setGroupName(groupId, group_name);
+          return `已将群名设置为：${group_name}`;
         } catch (error) {
-          return utils.handleError(session, error)
+          return utils.handleError(session, error);
         }
       }
     )())
@@ -210,13 +229,14 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     .usage('逐出指定成员，使用 -r 拒绝此人再次加群')
     .action(({ session, options }, target) => utils.withRoleCheck(session, logger, ['owner', 'admin'], ['owner', 'admin'],
       async () => {
-        const targetId = utils.parseTarget(target)
-        if (!targetId) return utils.handleError(session, new Error('请指定成员'))
         try {
-          await session.onebot.setGroupKick(getGroupId(options, session), Number(targetId), !!options.reject)
-          return `已将成员 ${targetId} 逐出群${options.reject ? '，并拒绝其再次加群' : ''}`
+          const targetId = utils.parseTarget(target);
+          if (!targetId) return utils.handleError(session, new Error('请指定有效的成员'));
+          const groupId = getGroupId(options, session);
+          await session.onebot.setGroupKick(groupId, Number(targetId), !!options.reject);
+          return `已将成员 ${targetId} 逐出群${options.reject ? '，并拒绝其再次加群' : ''}`;
         } catch (error) {
-          return utils.handleError(session, error)
+          return utils.handleError(session, error);
         }
       }
     ))
@@ -226,13 +246,13 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     .usage('撤回指定的回复消息')
     .action(({ session }) => utils.withRoleCheck(session, logger, ['owner', 'admin'], ['owner', 'admin'],
       async () => {
-        const messageId = session.quote?.id
-        if (!messageId) return utils.handleError(session, new Error('请回复需要撤回的消息'))
+        const messageId = session.quote?.id;
+        if (!messageId) return utils.handleError(session, new Error('请回复需要撤回的消息'));
         try {
-          await session.onebot.deleteMsg(Number(messageId))
-          return ``
+          await session.onebot.deleteMsg(messageId);
+          return ``;
         } catch (error) {
-          return utils.handleError(session, error)
+          return utils.handleError(session, error);
         }
       }
     )())

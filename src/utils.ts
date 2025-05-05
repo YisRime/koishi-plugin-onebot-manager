@@ -16,18 +16,20 @@ export const utils = {
       const at = h.select(h.parse(target), 'at')[0]?.attrs?.id;
       if (at) return at;
     } catch {}
-    return target.match(/@?(\d{5,10})/)?.[1] ?? null;
+    const match = target.match(/@?(\d{5,10})/)?.[1];
+    if (match && !isNaN(Number(match))) return match;
+    return null;
   },
 
   /**
    * 处理错误并发送提示消息，10秒后自动撤回。
    * @param session 会话对象
    * @param error 错误对象或消息
-   * @param prefix 消息前缀
    * @returns Promise<null>
    */
   handleError(session: Session, error: any) {
-    return session.send(`${error?.message || error}`).then(msg => {
+    const errorMsg = error?.message || String(error);
+    return session.send(errorMsg).then(msg => {
       if (typeof msg === 'string')
         setTimeout(() => session.bot.deleteMessage(session.channelId, msg).catch(() => {}), 10000);
       return null;
