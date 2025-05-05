@@ -14,7 +14,7 @@ export const utils = {
     if (!target) return null;
     try {
       const at = h.select(h.parse(target), 'at')[0]?.attrs?.id;
-      if (at) return at;
+      if (at && !isNaN(Number(at))) return at;
     } catch {}
     const match = target.match(/@?(\d{5,10})/)?.[1];
     if (match && !isNaN(Number(match))) return match;

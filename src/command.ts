@@ -73,15 +73,16 @@ function adminAction(set: boolean, utils: any, logger: Logger) {
     if (!target) return utils.handleError(session, new Error('请指定成员'))
     return utils.withRoleCheck(session, logger, ['owner'], ['owner', 'admin'],
       async () => {
-        const groupId = getGroupId(options, session)
-        const targetId = target ? utils.parseTarget(target) : session.userId
         try {
-          await session.onebot.setGroupAdmin(groupId, Number(targetId), set)
+          const groupId = getGroupId(options, session);
+          const targetId = utils.parseTarget(target);
+          if (!targetId) return utils.handleError(session, new Error('无效的成员ID'));
+          await session.onebot.setGroupAdmin(groupId, Number(targetId), set);
           return set
             ? `已设置成员 ${targetId} 为管理`
-            : `已取消成员 ${targetId} 的管理`
+            : `已取消成员 ${targetId} 的管理`;
         } catch (error) {
-          return utils.handleError(session, error)
+          return utils.handleError(session, error);
         }
       }
     )
@@ -149,7 +150,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
       }
     )())
 
-  const essenceCmd = qgroup.subcommand('essence [messageId:string]', '设置精华消息')
+  const essence = qgroup.subcommand('essence [messageId:string]', '设置精华消息')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置指定消息为精华消息')
     .action(({ session }, messageId) => utils.withRoleCheck(session, logger, ['owner', 'admin'], ['owner', 'admin'],
@@ -164,7 +165,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
         }
       }
     ))
-  essenceCmd.subcommand('.del [messageId:string]', '移除精华消息')
+  essence.subcommand('.del [messageId:string]', '移除精华消息')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('移除指定消息的精华消息')
     .action(({ session }, messageId) => utils.withRoleCheck(session, logger, ['owner', 'admin'], ['owner', 'admin'],
@@ -195,16 +196,17 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     .usage('禁言指定成员，默认 30 分钟')
     .action(({ session, options }, target, duration) => utils.withRoleCheck(session, logger, ['owner', 'admin'], ['owner', 'admin'],
       async () => {
-        const targetId = utils.parseTarget(target)
-        if (!targetId) return utils.handleError(session, new Error('请指定成员'))
-        const banDuration = options.cancel ? 0 : (duration ? Number(duration) : 1800)
         try {
-          await session.onebot.setGroupBan(getGroupId(options, session), Number(targetId), banDuration)
+          const groupId = getGroupId(options, session);
+          const targetId = utils.parseTarget(target);
+          if (!targetId) return utils.handleError(session, new Error('请指定有效成员'));
+          const banDuration = options.cancel ? 0 : (duration ? Number(duration) : 1800);
+          await session.onebot.setGroupBan(groupId, Number(targetId), banDuration);
           return options.cancel
             ? `已取消禁言成员 ${targetId}`
-            : `已禁言成员 ${targetId} ${banDuration} 秒`
+            : `已禁言成员 ${targetId} ${banDuration} 秒`;
         } catch (error) {
-          return utils.handleError(session, error)
+          return utils.handleError(session, error);
         }
       }
     ))
