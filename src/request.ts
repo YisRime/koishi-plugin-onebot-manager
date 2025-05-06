@@ -253,24 +253,15 @@ export class OnebotRequest {
             operator = await session.bot.getUser?.(operatorId.toString())?.catch(() => null) ?? null;
         }
       } catch {}
-      let msg = `时间：${new Date().toLocaleString()}\n`;
-      if (session.userId) msg += `用户：${user?.name ? `${user.name}(${session.userId})` : session.userId}\n`;
-      if (type === 'friend') {
-        msg += `类型：好友申请\n`;
-        if (user?.avatar) msg += `<image url="${user.avatar}"/>\n`;
-        if (eventData.comment) msg += `验证信息：${eventData.comment}\n`;
-      } else {
-        if (session.guildId) msg += `群组：${guild?.name ? `${guild.name}(${session.guildId})` : session.guildId}\n`;
-        if (type === 'guild') {
-          if (eventData.sub_type) msg += `类型：${eventData.sub_type === 'invite' ? '群邀请' : '直接入群'}\n`;
-          const operatorId = eventData.operator_id;
-          if (operatorId && operatorId !== session.userId)
-            msg += `操作者：${operator?.name ? `${operator.name}(${operatorId})` : operatorId}\n`;
-        } else if (type === 'member') {
-          msg += `类型：加群请求\n`;
-          if (eventData.comment) msg += `💬 验证信息：${eventData.comment}\n`;
-        }
-      }
+      const isDirectBotJoin = type === 'guild' && eventData.sub_type !== 'invite' && session.userId === session.selfId;
+      let msg = '';
+      if (user?.avatar) msg += `<image url="${user.avatar}"/>\n`;
+      msg += `类型：${type === 'friend' ? '好友申请' : type === 'member' ? '加群请求' : eventData.sub_type === 'invite' ? '群邀请' : '直接入群'}\n`;
+      if (session.userId && !isDirectBotJoin) msg += `用户：${user?.name ? `${user.name}(${session.userId})` : session.userId}\n`;
+      const operatorId = eventData.operator_id;
+      if (type === 'guild' && operatorId && operatorId !== session.userId) msg += `操作者：${operator?.name ? `${operator.name}(${operatorId})` : operatorId}\n`;
+      if (type !== 'friend' && session.guildId) msg += `群组：${guild?.name ? `${guild.name}(${session.guildId})` : session.guildId}\n`;
+      if (eventData.comment) msg += `验证信息：${eventData.comment}\n`;
       const requestMode = this.config[`${type}Request`] as Request || 'reject';
       msg += `处理模式：${isManualMode ? '人工审核' : requestMode === 'auto' ? '自动审核' : requestMode === 'accept' ? '自动通过' : '自动拒绝'}\n`;
       const sendFunc = isPrivate
