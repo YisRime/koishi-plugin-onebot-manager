@@ -5,10 +5,27 @@ import { Command, Logger } from 'koishi'
  */
 function getTitleLen(title: string) {
   return Array.from(title).reduce((len, char) => {
-    return len + (
-      /[\u1F600-\u1F64F\u1F300-\u1F5FF\u1F680-\u1F6FF\u2600-\u26FF\u2700-\u27BF\u1F900-\u1F9FF\u1FA70-\u1FAFF]/.test(char) ? 6 :
-      /[\u0020-\u007E]/.test(char) ? 1 : 3
-    );
+    const code = char.codePointAt(0);
+    // Emoji 字符
+    if (code && (
+      (code >= 0x1F000 && code <= 0x1FFFF) || (code >= 0x2600 && code <= 0x26FF) ||
+      (code >= 0x2700 && code <= 0x27BF) || code === 0x303D || code === 0x2049 ||
+      code === 0x203C || code === 0x2139 || (code >= 0x2000 && code <= 0x200F) ||
+      (code >= 0x2028 && code <= 0x202F) || code === 0x205F || (code >= 0x2065 && code <= 0x206F) ||
+      (code >= 0x20D0 && code <= 0x20FF) || (code >= 0x2100 && code <= 0x214F) ||
+      (code >= 0x2300 && code <= 0x23FF) || (code >= 0x2B00 && code <= 0x2BFF) ||
+      (code >= 0x2900 && code <= 0x297F) || (code >= 0x3200 && code <= 0x32FF) ||
+      (code >= 0xD800 && code <= 0xDFFF) || (code >= 0xFE00 && code <= 0xFE0F) ||
+      (code >= 0xFFF0 && code <= 0xFFFF)
+    )) {
+      return len + 6;
+    }
+    // ASCII字符 (英文、数字、标点)
+    if (code && code >= 0x0020 && code <= 0x007E) {
+      return len + 1;
+    }
+    // 其他字符 (包括汉字)
+    return len + 3;
   }, 0);
 }
 
@@ -28,14 +45,14 @@ async function getTargetId(target: any, session: any, utils: any, groupId: numbe
   // 无目标时返回自身ID
   if (!target) return session.userId;
   const parsed = utils.parseTarget(target);
-  if (!parsed) throw new Error('无效的成员ID');
+  if (!parsed) return '无效成员';
   // 不需要权限检查或检查通过时返回目标ID
   if (!roleCheck) return parsed;
   try {
     const info = await session.onebot.getGroupMemberInfo(groupId, Number(session.userId), true);
     return info?.role !== 'member' ? parsed : session.userId;
   } catch {
-    throw new Error('获取成员信息失败');
+    return '获取成员信息失败';
   }
 }
 
@@ -62,10 +79,10 @@ function createCommandAction(utils: any, logger: Logger, botRoles: string[], use
 function adminAction(set: boolean, utils: any, logger: Logger) {
   return createCommandAction(utils, logger, ['owner'], ['owner', 'admin'],
     async (session, options, target) => {
-      if (!target) throw new Error('请指定成员');
+      if (!target) return '请指定成员';
       const groupId = getGroupId(options, session);
       const targetId = utils.parseTarget(target);
-      if (!targetId) throw new Error('无效的成员ID');
+      if (!targetId) return '无效的成员ID';
       await session.onebot.setGroupAdmin(groupId, Number(targetId), set);
       return set ? `已设置成员 ${targetId} 为管理` : `已取消成员 ${targetId} 的管理`;
     }
@@ -82,7 +99,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     .usage('设置或清除指定成员的群头衔\n使用引号添加不连续的内容，最多18字符\n英文(标点)和数字1字符，中文和其他符号3字符，Emoji6字符')
     .action(createCommandAction(utils, logger, ['owner'], [],
       async (session, options, title = '', target) => {
-        if (title && getTitleLen(title) > 18) throw new Error('设置头衔失败: 长度超过18字符');
+        if (title && getTitleLen(title) > 18) return '设置头衔失败: 长度超过18字符';
         const groupId = getGroupId(options, session);
         const targetId = await getTargetId(target, session, utils, groupId, !!target);
         await session.onebot.setGroupSpecialTitle(groupId, Number(targetId), title);
@@ -109,7 +126,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     .usage('设置当前群的群名')
     .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
       async (session, options, group_name) => {
-        if (!group_name) throw new Error('请输入群名');
+        if (!group_name) return '请输入群名';
         const groupId = getGroupId(options, session);
         await session.onebot.setGroupName(groupId, group_name);
         return `已将群名设置为：${group_name}`;
@@ -123,7 +140,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
       async (session, options, messageId) => {
         messageId = messageId || session.quote?.id;
-        if (!messageId) throw new Error('请提供消息ID或引用消息');
+        if (!messageId) return '请提供消息ID或引用消息';
         await session.onebot.setEssenceMsg(messageId);
         return '已设置精华消息';
       }
@@ -136,7 +153,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
       async (session, options, messageId) => {
         messageId = messageId || session.quote?.id;
-        if (!messageId) throw new Error('请提供消息ID或引用消息');
+        if (!messageId) return '请提供消息ID或引用消息';
         await session.onebot.deleteEssenceMsg(messageId);
         return '已移除精华消息';
       }
@@ -163,7 +180,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
       async (session, options, target, duration) => {
         const groupId = getGroupId(options, session);
         const targetId = utils.parseTarget(target);
-        if (!targetId) throw new Error('请指定有效成员');
+        if (!targetId) return '请指定有效成员';
         const banDuration = options.cancel ? 0 : (duration ? Number(duration) : 1800);
         await session.onebot.setGroupBan(groupId, Number(targetId), banDuration);
         return options.cancel
@@ -193,7 +210,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
       async (session, options, target) => {
         const targetId = utils.parseTarget(target);
-        if (!targetId) throw new Error('请指定有效的成员');
+        if (!targetId) return '请指定有效的成员';
         const groupId = getGroupId(options, session);
         await session.onebot.setGroupKick(groupId, Number(targetId), !!options.reject);
         return `已将成员 ${targetId} 逐出群${options.reject ? '，并拒绝其再次加群' : ''}`;
@@ -207,7 +224,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
       async (session) => {
         const messageId = session.quote?.id;
-        if (!messageId) throw new Error('请回复需要撤回的消息');
+        if (!messageId) return '请回复需要撤回的消息';
         await session.onebot.deleteMsg(messageId);
         return '';
       }
