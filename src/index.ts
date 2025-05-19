@@ -65,7 +65,7 @@ export const Config: Schema<Config> = Schema.intersect([
       Schema.const('auto').description('自动'),
     ]).description('处理入群邀请').default('reject'),
     manualTimeout: Schema.number()
-      .description('手动超时时间（分钟）').default(60).min(0),
+      .description('手动超时时间（分钟）').default(720).min(0),
     manualTimeoutAction: Schema.union([
       Schema.const('accept').description('同意'),
       Schema.const('reject').description('拒绝'),
@@ -120,7 +120,7 @@ export function apply(ctx: Context, config: Config = {}) {
   const logger = ctx.logger('onebot-manager')
   if (config.enable !== false)
     new OnebotRequest(ctx, logger, config).registerEventListeners()
-  const qgroup = ctx.command('qgroup', 'QQ 群管').usage('QQ 群管，仅群主或管理员可用')
+  const qgroup = ctx.command('qgroup', 'QQ 群管').usage('群管相关功能，需要管理权限')
   new Onebot().registerCommands(qgroup)
   registerCommands(qgroup, logger, utils)
 }

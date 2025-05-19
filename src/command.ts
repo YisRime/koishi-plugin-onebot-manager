@@ -121,9 +121,9 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     ));
 
   // 设置群名
-  qgroup.subcommand('groupname <group_name:string>', '设置群名')
+  qgroup.subcommand('groupname <group_name:string>', '设置群名称')
     .option('group', '-g, --group <groupId> 指定群号')
-    .usage('设置当前群的群名')
+    .usage('设置当前群的名称')
     .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
       async (session, options, group_name) => {
         if (!group_name) return '请输入群名';
@@ -221,7 +221,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
   qgroup.subcommand('revoke', '撤回消息')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('撤回指定的回复消息')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
+    .action(createCommandAction(utils, logger, ['owner', 'admin'], [],
       async (session) => {
         const messageId = session.quote?.id;
         if (!messageId) return '请回复需要撤回的消息';
