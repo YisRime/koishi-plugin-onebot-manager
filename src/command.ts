@@ -220,13 +220,16 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
   // 撤回消息
   qgroup.subcommand('revoke', '撤回消息')
     .option('group', '-g, --group <groupId> 指定群号')
-    .usage('撤回指定的回复消息')
+    .usage('撤回指定回复消息（仅限撤回自己的消息）')
     .action(createCommandAction(utils, logger, ['owner', 'admin'], [],
       async (session) => {
         const messageId = session.quote?.id;
         if (!messageId) return '请回复需要撤回的消息';
-        await session.onebot.deleteMsg(messageId);
-        return '';
+        let senderId = session.quote.user.id;
+        if (senderId && String(senderId) === session.userId) {
+          await session.onebot.deleteMsg(messageId);
+          return '';
+        }
       }
     ));
 }

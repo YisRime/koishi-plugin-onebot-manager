@@ -114,10 +114,9 @@ export class OnebotRequest {
   public async processRequest(session: Session, type: RequestType): Promise<void> {
     const requestKey = this.getRequestKey(session, type);
     this.cancelActiveRequest(requestKey);
-    const requestId = `${type}:${session.userId}:${session.guildId || 'none'}`;
     const requestMode = this.config[`${type}Request`] as Request || 'reject';
     try {
-      const notified = await this.setupNotification(session, type, requestId, requestMode === 'manual');
+      const notified = await this.setupNotification(session, type, requestKey, requestMode === 'manual');
       if (requestMode === 'auto') {
         const result = await this.shouldAutoAccept(session, type);
         await this.processRequestAction(session, type, result === true, typeof result === 'string' ? result : '条件不符');
@@ -125,10 +124,10 @@ export class OnebotRequest {
         await this.processRequestAction(session, type, requestMode === 'accept', requestMode === 'manual' && !notified ? '通知失败，已自动处理' : '');
       }
     } catch (error) {
-      this.logger.error(`处理请求${requestId}失败: ${error}`);
+      this.logger.error(`处理请求${requestKey}失败: ${error}`);
       try { await this.processRequestAction(session, type, false, '处理出错'); } catch {}
     } finally {
-      if (requestMode !== 'manual' || !await this.setupNotification(session, type, requestId, true)) this.cleanupRequest(requestId);
+      if (requestMode !== 'manual' || !await this.setupNotification(session, type, requestKey, true)) this.cleanupRequest(requestKey);
     }
   }
 
@@ -251,12 +250,10 @@ export class OnebotRequest {
     try {
       const requestNumber = this.nextRequestNumber++;
       this.requestNumberMap.set(requestNumber, requestId);
-      // 记录请求信息
-      const requestKey = this.getRequestKey(session, type);
-      if (!this.activeRequests.has(requestKey)) {
-        this.activeRequests.set(requestKey, { requestNumber });
+      if (!this.activeRequests.has(requestId)) {
+        this.activeRequests.set(requestId, { requestNumber });
       } else {
-        this.activeRequests.get(requestKey).requestNumber = requestNumber;
+        this.activeRequests.get(requestId).requestNumber = requestNumber;
       }
       const eventData = session.event?._data || {};
       let user = null, guild = null, operator = null;
@@ -284,7 +281,7 @@ export class OnebotRequest {
       await sendFunc(msg);
       if (isManualMode) {
         this.pendingRequests.set(requestId, { session, type });
-        this.setupPromptResponse(session, type, requestId, requestNumber, targetId, isPrivate, requestKey);
+        this.setupPromptResponse(session, type, requestId, requestNumber, targetId, isPrivate);
       }
       return true;
     } catch (error) {
@@ -297,7 +294,7 @@ export class OnebotRequest {
    * 设置人工审核响应监听
    */
   private async setupPromptResponse(session: Session, type: RequestType, requestId: string,
-    requestNumber: number, targetId: string, isPrivate: boolean, requestKey: string) {
+    requestNumber: number, targetId: string, isPrivate: boolean) {
     const sendFunc = isPrivate
       ? (msg) => session.bot.sendPrivateMessage(targetId, msg)
       : (msg) => session.bot.sendMessage(targetId, msg);
@@ -321,12 +318,12 @@ export class OnebotRequest {
         this.logger.error(`响应处理失败: ${error}`);
         await sendFunc(`处理请求 #${requestNumber} 失败: ${error.message || '未知错误'}`);
       }
-      this.activeRequests.delete(requestKey);
+      this.activeRequests.delete(requestId);
     });
     // 保存中间件卸载
-    const activeRequest = this.activeRequests.get(requestKey) || {};
+    const activeRequest = this.activeRequests.get(requestId) || {};
     activeRequest.disposer = disposer;
-    this.activeRequests.set(requestKey, activeRequest);
+    this.activeRequests.set(requestId, activeRequest);
     const timeoutMin = typeof this.config.manualTimeout === 'number' ? this.config.manualTimeout : 60;
     const timeoutAction = (this.config.manualTimeoutAction === 'accept' || this.config.manualTimeoutAction === 'reject')
       ? this.config.manualTimeoutAction : 'reject';
@@ -343,11 +340,11 @@ export class OnebotRequest {
         } catch (e) {
           this.logger.error(`超时处理失败: ${e}`);
         }
-        this.activeRequests.delete(requestKey);
+        this.activeRequests.delete(requestId);
       }, timeoutMin * 60 * 1000);
       // 保存定时器引用
       activeRequest.timeoutTimer = timeoutTimer;
-      this.activeRequests.set(requestKey, activeRequest);
+      this.activeRequests.set(requestId, activeRequest);
     }
   }
 
