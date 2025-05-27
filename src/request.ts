@@ -115,19 +115,33 @@ export class OnebotRequest {
     const requestKey = this.getRequestKey(session, type);
     this.cancelActiveRequest(requestKey);
     const requestMode = this.config[`${type}Request`] as Request || 'reject';
+    const needsNotification = requestMode === 'manual' || requestMode === 'auto';
+    let notificationSent = false;
     try {
-      const notified = await this.setupNotification(session, type, requestKey, requestMode === 'manual');
-      if (requestMode === 'auto') {
+      // 发送通知
+      if (needsNotification) notificationSent = await this.setupNotification(session, type, requestKey, requestMode === 'manual');
+      // 处理请求
+      if (requestMode === 'manual' && notificationSent) return;
+      // 自动处理
+      let approve = false;
+      let reason = '';
+      if (requestMode === 'accept') {
+        approve = true;
+      } else if (requestMode === 'auto') {
         const result = await this.shouldAutoAccept(session, type);
-        await this.processRequestAction(session, type, result === true, typeof result === 'string' ? result : '条件不符');
-      } else if (!(requestMode === 'manual' && notified)) {
-        await this.processRequestAction(session, type, requestMode === 'accept', requestMode === 'manual' && !notified ? '通知失败，已自动处理' : '');
+        approve = result === true;
+        reason = typeof result === 'string' ? result : '条件不符';
+      } else if (requestMode === 'manual' && !notificationSent) {
+        reason = '通知失败，已自动拒绝';
       }
+      await this.processRequestAction(session, type, approve, reason);
     } catch (error) {
       this.logger.error(`处理请求${requestKey}失败: ${error}`);
-      try { await this.processRequestAction(session, type, false, '处理出错'); } catch {}
+      try {
+        await this.processRequestAction(session, type, false, '处理出错');
+      } catch {}
     } finally {
-      if (requestMode !== 'manual' || !await this.setupNotification(session, type, requestKey, true)) this.cleanupRequest(requestKey);
+      if (requestMode !== 'manual' || !notificationSent) this.cleanupRequest(requestKey);
     }
   }
 
