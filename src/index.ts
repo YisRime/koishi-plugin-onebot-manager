@@ -3,7 +3,6 @@ import {} from "koishi-plugin-adapter-onebot";
 import { OnebotRequest, Request } from './request'
 import { utils } from './utils'
 import { registerCommands } from './command'
-import { Onebot } from './onebot'
 
 export const name = 'onebot-manager'
 export const inject = { optional: ['database'] }
@@ -121,6 +120,5 @@ export function apply(ctx: Context, config: Config = {}) {
   if (config.enable !== false)
     new OnebotRequest(ctx, logger, config).registerEventListeners()
   const qgroup = ctx.command('qgroup', 'QQ 群管').usage('群管相关功能，需要管理权限')
-  new Onebot().registerCommands(qgroup)
   registerCommands(qgroup, logger, utils)
 }

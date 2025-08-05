@@ -50,29 +50,6 @@ GuildMinMemberCount: -1  # 最低群成员数量（-1表示不启用此条件）
 GuildMaxCapacity: -1   # 最低群容量要求（-1表示不启用此条件）
 ```
 
-## OneBot命令
-
-| 命令 | 说明 | 示例 |
-|-----|------|------|
-| `qgroup.restart` | 重启 OneBot | `qgroup.restart` |
-| `qgroup.clean` | 清理缓存 | `qgroup.clean` |
-| `get` | 获取消息内容及状态 | `get -i 1234567890` |
-| `get.forward` | 获取合并转发内容 | `get.forward -i 1234567890` |
-| `get.record` | 获取语音文件 | `get.record -f 1234.silk -t mp3` |
-| `get.image` | 获取图片文件 | `get.image -f abc.image` |
-| `get.file` | 获取文件信息 | `get.file -i file_id` |
-| `get.stat` | 获取运行状态 | `get.stat` |
-| `get.ver` | 获取版本信息 | `get.ver` |
-| `get.csrf` | 获取相关接口凭证 | `get.csrf qun.qq.com` |
-| `info` | 查询账号信息 | `info -n` |
-| `info.user` | 查询其它账号信息 | `info.user 123456 -n` |
-| `info.myfriend` | 获取本账号好友列表 | `info.myfriend all` |
-| `info.mygroup` | 获取本账号群组列表 | `info.mygroup 1` |
-| `info.group` | 查询群信息 | `info.group 123456 -n` |
-| `info.groupuser` | 查询群成员信息 | `info.groupuser 123456 654321 -n` |
-| `info.memberlist` | 获取群成员列表 | `info.memberlist 123456 1` |
-| `info.grouphonor` | 查询群荣誉信息 | `info.grouphonor 123456 -t talkative` |
-
 ## 群管理命令
 
 | 命令 | 描述 | 示例 |
