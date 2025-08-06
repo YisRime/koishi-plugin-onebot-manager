@@ -138,7 +138,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置指定消息为精华消息')
     .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
-      async (session, options, messageId) => {
+      async (session, messageId) => {
         messageId = messageId || session.quote?.id;
         if (!messageId) return '请提供消息ID或引用消息';
         await session.onebot.setEssenceMsg(messageId);
@@ -151,7 +151,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('移除指定消息的精华消息')
     .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
-      async (session, options, messageId) => {
+      async (session, messageId) => {
         messageId = messageId || session.quote?.id;
         if (!messageId) return '请提供消息ID或引用消息';
         await session.onebot.deleteEssenceMsg(messageId);
@@ -175,13 +175,14 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
   const mute = qgroup.subcommand('mute <target> [duration]', '禁言群成员')
     .option('cancel', '-c, --cancel 取消禁言')
     .option('group', '-g, --group <groupId> 指定群号')
-    .usage('禁言指定成员，默认 30 分钟')
+    .usage('禁言指定成员，默认 30 分钟，最长 30 天')
     .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
       async (session, options, target, duration) => {
         const groupId = getGroupId(options, session);
         const targetId = utils.parseTarget(target);
         if (!targetId) return '请指定有效成员';
         const banDuration = options.cancel ? 0 : (duration ? Number(duration) : 1800);
+        if (banDuration > 2591999) return `操作失败：禁言时长不能超过 30 天`;
         await session.onebot.setGroupBan(groupId, Number(targetId), banDuration);
         return options.cancel
           ? `已取消禁言成员 ${targetId}`
