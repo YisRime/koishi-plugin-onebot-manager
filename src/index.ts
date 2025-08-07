@@ -24,6 +24,11 @@ export interface Config {
   enable?: boolean
   enableNotify?: boolean
   notifyTarget?: string
+  enableJoin?: boolean
+  joinMessage?: string
+  enableLeave?: boolean
+  enableLeaveMessage?: boolean
+  leaveMessage?: string
   friendRequest?: Request
   guildRequest?: Request
   memberRequest?: Request
@@ -33,6 +38,7 @@ export interface Config {
   MemberRegTime?: number
   MemberLevel?: number
   MemberVipLevel?: number
+  MemberRequestAutoRules?: { groupId: string; keyword: string }[]
   GuildAllowUsers?: string[]
   GuildMinMemberCount?: number
   GuildMaxCapacity?: number
@@ -44,6 +50,29 @@ export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
     enable: Schema.boolean().description('开启请求监听').default(true),
   }).description('基础配置'),
+  Schema.object({
+    enableJoin: Schema.boolean().description('开启入群监听').default(false),
+  }).description('入群事件'),
+  Schema.union([
+    Schema.object({
+      enableJoin: Schema.const(true).required(),
+      joinMessage: Schema.string().default('欢迎{at}加入本群！')
+      .description('自定义入群欢迎（占位符: {at}/{user}/{guild}）'),
+    }),
+    Schema.object({}),
+  ]),
+  Schema.object({
+    enableLeave: Schema.boolean().description('开启退群监听').default(false),
+  }).description('退群事件'),
+  Schema.union([
+    Schema.object({
+      enableLeave: Schema.const(true).required(),
+      enableLeaveMessage: Schema.boolean().description('开启退群提示').default(false),
+      leaveMessage: Schema.string().default('{at}已离开本群')
+        .description('自定义退群提示（占位符: {at}/{user}/{guild}/{atop}/{op}）'),
+    }),
+    Schema.object({}),
+  ]),
   Schema.object({
     friendRequest: Schema.union([
       Schema.const('accept').description('同意'),
@@ -70,7 +99,7 @@ export const Config: Schema<Config> = Schema.intersect([
       Schema.const('reject').description('拒绝'),
   ]).description('超时自动操作').default('reject'),
     enableNotify: Schema.boolean()
-      .description('开启请求通知').default(false),
+      .description('开启通知').default(false),
   }).description('请求配置'),
   Schema.union([
     Schema.object({
@@ -94,6 +123,10 @@ export const Config: Schema<Config> = Schema.intersect([
       MemberRegTime: Schema.number().description('最短注册年份').default(-1).min(-1),
       MemberLevel: Schema.number().description('最低QQ等级').default(-1).min(-1).max(256),
       MemberVipLevel: Schema.number().description('最低会员等级').default(-1).min(-1).max(10),
+      MemberAutoRules: Schema.array(Schema.object({
+        guildId: Schema.string().description('群号'),
+        keyword: Schema.string().description('正则'),
+      })).description('关键词规则'),
     }).description('加群请求通过配置'),
     Schema.object({}),
   ]),
@@ -117,8 +150,7 @@ export const Config: Schema<Config> = Schema.intersect([
 
 export function apply(ctx: Context, config: Config = {}) {
   const logger = ctx.logger('onebot-manager')
-  if (config.enable !== false)
-    new OnebotRequest(ctx, logger, config).registerEventListeners()
+  new OnebotRequest(ctx, logger, config).registerEventListeners()
   const qgroup = ctx.command('qgroup', 'QQ 群管').usage('群管相关功能，需要管理权限')
   registerCommands(qgroup, logger, utils)
 }

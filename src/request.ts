@@ -83,6 +83,76 @@ export class OnebotRequest {
   ) {}
 
   /**
+   * 处理入群事件
+   */
+  private async handleMemberAdded(session: Session): Promise<void> {
+    try {
+      const messageTemplate = this.config.joinMessage;
+      const user = await session.bot.getUser(session.userId).catch(() => null);
+      const guild = await session.bot.getGuild(session.guildId).catch(() => null);
+      const replacements = {
+        '{at}': `<at userId="${session.userId}"/>`,
+        '{user}': user?.name || session.userId,
+        '{guild}': guild?.name || session.guildId,
+      };
+      const message = messageTemplate.replace(/{at}|{user}|{guild}/g, (match) => replacements[match]);
+      if (message.trim()) await session.bot.sendMessage(session.guildId, message);
+    } catch (error) {
+      this.logger.error('发送入群欢迎失败:', error);
+    }
+  }
+
+  /**
+   * 处理退群事件
+   */
+  private async handleMemberRemoved(session: Session): Promise<void> {
+    try {
+      const isBot = session.userId === session.selfId;
+      const operator = session.operatorId ? await session.bot.getUser(session.operatorId).catch(() => null) : null;
+      if (isBot) {
+        if (this.config.enableNotify && this.config.notifyTarget) {
+          const [targetType, targetId] = this.config.notifyTarget.split(':');
+          const guild = await session.bot.getGuild(session.guildId).catch(() => null);
+          const guildName = guild?.name ? `${guild.name} (${session.guildId})` : session.guildId;
+          let causeMessage: string;
+          if (operator && operator.id !== session.selfId) {
+              const operatorName = operator.name ? `${operator.name} (${operator.id})` : operator.id;
+              causeMessage = `已被 ${operatorName} 移出`;
+          } else {
+              causeMessage = '已退出';
+          }
+          const botMessage = `${causeMessage}群组 ${guildName}`;
+          if (targetType === 'private' && targetId) {
+              await session.bot.sendPrivateMessage(targetId, botMessage);
+          } else if (targetType === 'guild' && targetId) {
+              await session.bot.sendMessage(targetId, botMessage);
+          }
+        }
+        return;
+      }
+      if (!this.config.enableLeaveMessage) return;
+      const user = await session.bot.getUser(session.userId).catch(() => null);
+      const guild = await session.bot.getGuild(session.guildId).catch(() => null);
+      const isKick = operator && operator.id !== session.userId;
+      let message: string;
+      const customMessageTemplate = this.config.leaveMessage;
+      if (customMessageTemplate) {
+        const replacements = {
+            '{at}': `<at userId="${session.userId}"/>`,
+            '{user}': user?.name || session.userId,
+            '{guild}': guild?.name || session.guildId,
+            '{atop}': isKick ? `<at userId="${session.operatorId}"/>` : '',
+            '{op}': isKick ? (operator?.name || session.operatorId) : '',
+        };
+        message = customMessageTemplate.replace(/{at}|{user}|{guild}|{atop}|{op}/g, (match) => replacements[match]);
+      }
+      if (message.trim()) await session.bot.sendMessage(session.guildId, message);
+    } catch (error) {
+      this.logger.error('发送退群提示失败:', error);
+    }
+  }
+
+  /**
    * 生成请求的唯一键
    * @param session - Koishi 会话
    * @param type - 请求类型
@@ -184,11 +254,29 @@ export class OnebotRequest {
    * @returns 是否接受，如不接受返回原因
    */
   private async shouldAutoAccept(session: Session, type: RequestType): Promise<boolean | string> {
-    if (type === 'friend' || type === 'member') {
-      const prefix = type === 'friend' ? 'Friend' : 'Member';
+    if (type === 'member') {
+      const { MemberRequestAutoRules = [], MemberRegTime = -1, MemberLevel = -1, MemberVipLevel = -1 } = this.config;
+      const groupRules = MemberRequestAutoRules.filter(r => r.groupId === session.guildId && r.keyword);
+      if (groupRules.length > 0) {
+        const validationMessage = session.event?._data?.comment || '';
+        if (validationMessage) {
+          for (const rule of groupRules) {
+            try {
+              const regex = new RegExp(rule.keyword);
+              if (regex.test(validationMessage)) return true;
+            } catch (e) {
+              this.logger.warn(`群 ${rule.groupId} 正则无效: ${rule.keyword}`);
+            }
+          }
+        }
+        return '验证信息不符';
+      }
+      return this.checkUserConditions(session, MemberRegTime, MemberLevel, MemberVipLevel);
+    }
+    if (type === 'friend') {
       return this.checkUserConditions(
-        session, this.config[`${prefix}RegTime`] ?? -1,
-        this.config[`${prefix}Level`] ?? -1, this.config[`${prefix}VipLevel`] ?? -1
+        session, this.config.FriendRegTime ?? -1,
+        this.config.FriendLevel ?? -1, this.config.FriendVipLevel ?? -1
       );
     }
     if (type === 'guild') {
@@ -363,18 +451,25 @@ export class OnebotRequest {
   }
 
   /**
-   * 注册事件监听器，自动处理 OneBot 请求事件
+   * 注册事件监听器，自动处理 OneBot 请求和成员变动事件
    */
   public registerEventListeners(): void {
-    const handleRequest = (type: RequestType) => async (session: Session) => {
-      const data = session.event?._data || {};
-      session.userId = (data.user_id || data.userId || session.userId)?.toString();
-      if (type !== 'friend') session.guildId = (data.group_id || data.groupId || session.guildId)?.toString() || '';
-      await this.processRequest(session, type);
-    };
-    this.ctx.on('friend-request', handleRequest('friend'));
-    this.ctx.on('guild-request', handleRequest('guild'));
-    this.ctx.on('guild-member-request', handleRequest('member'));
-    this.ctx.on('guild-added', handleRequest('guild'));
+    // 监听请求类事件
+    if (this.config.enable) {
+      const handleRequest = (type: RequestType) => async (session: Session) => {
+        const data = session.event?._data || {};
+        session.userId = (data.user_id || data.userId || session.userId)?.toString();
+        if (type !== 'friend') session.guildId = (data.group_id || data.groupId || session.guildId)?.toString() || '';
+        await this.processRequest(session, type);
+      };
+      this.ctx.on('friend-request', handleRequest('friend'));
+      this.ctx.on('guild-request', handleRequest('guild'));
+      this.ctx.on('guild-member-request', handleRequest('member'));
+      this.ctx.on('guild-added', handleRequest('guild'));
+    }
+    // 监听入群事件
+    if (this.config.enableJoin) this.ctx.on('guild-member-added', this.handleMemberAdded.bind(this));
+    // 监听退群事件
+    if (this.config.enableLeave) this.ctx.on('guild-member-removed', this.handleMemberRemoved.bind(this));
   }
 }
