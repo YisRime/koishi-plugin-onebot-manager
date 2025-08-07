@@ -108,7 +108,7 @@ export const Config: Schema<Config> = Schema.intersect([
       MemberAutoRules: Schema.array(Schema.object({
         guildId: Schema.string().description('群号'),
         keyword: Schema.string().description('正则'),
-      })).description('关键词规则'),
+      })).description('关键词规则').role('table'),
     }).description('加群请求通过配置'),
     Schema.object({}),
   ]),
