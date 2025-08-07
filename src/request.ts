@@ -130,7 +130,7 @@ export class OnebotRequest {
         }
         return;
       }
-      if (!this.config.enableLeaveMessage) return;
+      if (!this.config.enableLeaveMsg) return;
       const user = await session.bot.getUser(session.userId).catch(() => null);
       const guild = await session.bot.getGuild(session.guildId).catch(() => null);
       const isKick = operator && operator.id !== session.userId;

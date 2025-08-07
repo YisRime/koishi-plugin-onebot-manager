@@ -27,7 +27,7 @@ export interface Config {
   enableJoin?: boolean
   joinMessage?: string
   enableLeave?: boolean
-  enableLeaveMessage?: boolean
+  enableLeaveMsg?: boolean
   leaveMessage?: string
   friendRequest?: Request
   guildRequest?: Request
@@ -49,30 +49,12 @@ export interface Config {
 export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
     enable: Schema.boolean().description('开启请求监听').default(true),
-  }).description('基础配置'),
-  Schema.object({
     enableJoin: Schema.boolean().description('开启入群监听').default(false),
-  }).description('入群事件'),
-  Schema.union([
-    Schema.object({
-      enableJoin: Schema.const(true).required(),
-      joinMessage: Schema.string().default('欢迎{at}加入本群！')
-      .description('自定义入群欢迎（占位符: {at}/{user}/{guild}）'),
-    }),
-    Schema.object({}),
-  ]),
-  Schema.object({
-    enableLeave: Schema.boolean().description('开启退群监听').default(false),
-  }).description('退群事件'),
-  Schema.union([
-    Schema.object({
-      enableLeave: Schema.const(true).required(),
-      enableLeaveMessage: Schema.boolean().description('开启退群提示').default(false),
-      leaveMessage: Schema.string().default('{at}已离开本群')
-        .description('自定义退群提示（占位符: {at}/{user}/{guild}/{atop}/{op}）'),
-    }),
-    Schema.object({}),
-  ]),
+    enableLeave: Schema.boolean().description('开启退群监听').default(true),
+    enableLeaveMsg: Schema.boolean().description('开启退群提示').default(false),
+    joinMessage: Schema.string().default('欢迎{at}加入本群！').description('自定义入群欢迎（占位符: {at}/{user}/{guild}）'),
+    leaveMessage: Schema.string().default('{at}已离开本群').description('自定义退群提示（占位符: {at}/{user}/{guild}/{atop}/{op}）'),
+  }).description('基础配置'),
   Schema.object({
     friendRequest: Schema.union([
       Schema.const('accept').description('同意'),
