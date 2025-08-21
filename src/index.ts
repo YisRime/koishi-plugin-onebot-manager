@@ -1,6 +1,6 @@
 import { Context, Schema } from 'koishi'
 import {} from "koishi-plugin-adapter-onebot";
-import { OnebotRequest, Request } from './request'
+import { OnebotRequest } from './request'
 import { utils } from './utils'
 import { registerCommands } from './command'
 
@@ -22,29 +22,21 @@ export const usage = `
 
 export interface Config {
   enable?: boolean
-  enableNotify?: boolean
   notifyTarget?: string
   enableJoin?: boolean
   joinMessage?: string
   enableLeave?: boolean
-  enableLeaveMsg?: boolean
   leaveMessage?: string
   enableKick?: boolean
-  friendRequest?: Request
-  guildRequest?: Request
-  memberRequest?: Request
-  FriendRegTime?: number
   FriendLevel?: number
-  FriendVipLevel?: number
-  MemberRegTime?: number
+  FriendRequestAutoKeyword?: string
   MemberLevel?: number
-  MemberVipLevel?: number
-  MemberRequestAutoRules?: { groupId: string; keyword: string }[]
+  MemberRequestAutoRules?: { guildId: string; keyword: string }[]
   GuildAllowUsers?: string[]
   GuildMinMemberCount?: number
   GuildMaxCapacity?: number
   manualTimeout?: number
-  manualTimeoutAction?: Request
+  manualTimeoutAction?: 'accept' | 'reject'
 }
 
 export const Config: Schema<Config> = Schema.intersect([
@@ -57,71 +49,26 @@ export const Config: Schema<Config> = Schema.intersect([
     leaveMessage: Schema.string().default('{userName} 已离开本群').description('自定义退群提示'),
   }).description('基础配置'),
   Schema.object({
-    friendRequest: Schema.union([
-      Schema.const('accept').description('同意'),
-      Schema.const('reject').description('拒绝'),
-      Schema.const('manual').description('手动'),
-      Schema.const('auto').description('自动'),
-    ]).description('处理好友请求').default('reject'),
-    memberRequest: Schema.union([
-      Schema.const('accept').description('同意'),
-      Schema.const('reject').description('拒绝'),
-      Schema.const('manual').description('手动'),
-      Schema.const('auto').description('自动'),
-    ]).description('处理加群请求').default('reject'),
-    guildRequest: Schema.union([
-      Schema.const('accept').description('同意'),
-      Schema.const('reject').description('拒绝'),
-      Schema.const('manual').description('手动'),
-      Schema.const('auto').description('自动'),
-    ]).description('处理入群邀请').default('reject'),
+    notifyTarget: Schema.string().description('通知目标(guild/private:number)').required(),
     manualTimeout: Schema.number()
-      .description('手动超时时间（分钟）').default(720).min(0),
+      .description('超时时长').default(720).min(0),
     manualTimeoutAction: Schema.union([
       Schema.const('accept').description('同意'),
       Schema.const('reject').description('拒绝'),
-  ]).description('超时自动操作').default('reject'),
-    enableNotify: Schema.boolean()
-      .description('开启通知').default(false),
+    ]).description('超时操作').default('accept'),
   }).description('请求配置'),
-  Schema.union([
-    Schema.object({
-      enableNotify: Schema.const(true).required(),
-      notifyTarget: Schema.string().description('通知目标(guild/private)').default('private:10000'),
-    }),
-    Schema.object({}),
-  ]),
-  Schema.union([
-    Schema.object({
-      friendRequest: Schema.const('auto').required(),
-      FriendRegTime: Schema.number().description('最短注册年份').default(-1).min(-1),
-      FriendLevel: Schema.number().description('最低QQ等级').default(-1).min(-1).max(256),
-      FriendVipLevel: Schema.number().description('最低会员等级').default(-1).min(-1).max(10),
-    }).description('好友请求通过配置'),
-    Schema.object({}),
-  ]),
-  Schema.union([
-    Schema.object({
-      memberRequest: Schema.const('auto').required(),
-      MemberRegTime: Schema.number().description('最短注册年份').default(-1).min(-1),
-      MemberLevel: Schema.number().description('最低QQ等级').default(-1).min(-1).max(256),
-      MemberVipLevel: Schema.number().description('最低会员等级').default(-1).min(-1).max(10),
-      MemberAutoRules: Schema.array(Schema.object({
-        guildId: Schema.string().description('群号'),
-        keyword: Schema.string().description('正则'),
-      })).description('关键词规则').role('table'),
-    }).description('加群请求通过配置'),
-    Schema.object({}),
-  ]),
-  Schema.union([
-    Schema.object({
-      guildRequest: Schema.const('auto').required(),
-      GuildAllowUsers: Schema.array(String).description('白名单邀请人ID').default([]),
-      GuildMinMemberCount: Schema.number().description('最低群成员数量').default(-1).min(-1).max(3000),
-      GuildMaxCapacity: Schema.number().description('最低群容量要求').default(-1).min(-1).max(3000),
-    }).description('入群邀请通过配置'),
-    Schema.object({}),
-  ]),
+  Schema.object({
+    FriendLevel: Schema.number().description('好友申请等级').default(-1).min(-1).max(256),
+    MemberLevel: Schema.number().description('加群最低等级').default(-1).min(-1).max(256),
+    GuildMinMemberCount: Schema.number().description('最低群成员数量').default(-1).min(-1).max(3000),
+    GuildMaxCapacity: Schema.number().description('最低被邀请群容量').default(-1).min(-1).max(3000),
+    FriendRequestAutoKeyword: Schema.string().description('好友申请关键词'),
+    MemberRequestAutoRules: Schema.array(Schema.object({
+      guildId: Schema.string().description('群号'),
+      keyword: Schema.string().description('正则'),
+    })).description('加群关键词规则').role('table'),
+    GuildAllowUsers: Schema.array(String).description('邀请加群白名单'),
+  }).description('条件配置'),
 ])
 
 export function apply(ctx: Context, config: Config = {}) {
