@@ -29,6 +29,7 @@ export interface Config {
   enableLeave?: boolean
   enableLeaveMsg?: boolean
   leaveMessage?: string
+  enableKick?: boolean
   friendRequest?: Request
   guildRequest?: Request
   memberRequest?: Request
@@ -49,11 +50,11 @@ export interface Config {
 export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
     enable: Schema.boolean().description('开启请求监听').default(true),
+    enableKick: Schema.boolean().description('开启被踢监听').default(true),
     enableJoin: Schema.boolean().description('开启入群监听').default(false),
-    enableLeave: Schema.boolean().description('开启退群监听').default(true),
-    enableLeaveMsg: Schema.boolean().description('开启退群提示').default(false),
-    joinMessage: Schema.string().default('欢迎{at}加入本群！').description('自定义入群欢迎（占位符: {at}/{user}/{guild}）'),
-    leaveMessage: Schema.string().default('{at}已离开本群').description('自定义退群提示（占位符: {at}/{user}/{guild}/{atop}/{op}）'),
+    enableLeave: Schema.boolean().description('开启退群监听').default(false),
+    joinMessage: Schema.string().default('欢迎 {userName} 加入本群！').description('自定义入群欢迎'),
+    leaveMessage: Schema.string().default('{userName} 已离开本群').description('自定义退群提示'),
   }).description('基础配置'),
   Schema.object({
     friendRequest: Schema.union([
@@ -117,14 +118,7 @@ export const Config: Schema<Config> = Schema.intersect([
       guildRequest: Schema.const('auto').required(),
       GuildAllowUsers: Schema.array(String).description('白名单邀请人ID').default([]),
       GuildMinMemberCount: Schema.number().description('最低群成员数量').default(-1).min(-1).max(3000),
-      GuildMaxCapacity: Schema.union([
-        Schema.const(-1).description('不限制'),
-        Schema.const(200).description('200'),
-        Schema.const(500).description('500'),
-        Schema.const(1000).description('1000'),
-        Schema.const(2000).description('2000'),
-        Schema.const(3000).description('3000'),
-      ]).description('最低群容量要求').default(-1),
+      GuildMaxCapacity: Schema.number().description('最低群容量要求').default(-1).min(-1).max(3000),
     }).description('入群邀请通过配置'),
     Schema.object({}),
   ]),

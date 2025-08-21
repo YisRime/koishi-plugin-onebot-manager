@@ -56,19 +56,22 @@ export interface OneBotGroupInfo {
   max_member_count: number
 }
 
+interface ActiveRequest {
+  session: Session;
+  type: RequestType;
+  requestNumber: number;
+  disposer?: () => void;
+  timeoutTimer?: NodeJS.Timeout;
+}
+
 /**
  * OneBot 请求处理类
  * 处理好友请求、群组请求和群成员请求
  */
 export class OnebotRequest {
-  private pendingRequests = new Map<string, { session: Session, type: RequestType }>();
   private requestNumberMap = new Map<number, string>();
   private nextRequestNumber = 1;
-  private activeRequests = new Map<string, {
-    disposer?: () => void,
-    timeoutTimer?: NodeJS.Timeout,
-    requestNumber?: number
-  }>();
+  private activeRequests = new Map<string, ActiveRequest>();
 
   /**
    * 创建 OneBot 请求处理实例
@@ -91,11 +94,13 @@ export class OnebotRequest {
       const user = await session.bot.getUser(session.userId).catch(() => null);
       const guild = await session.bot.getGuild(session.guildId).catch(() => null);
       const replacements = {
-        '{at}': `<at userId="${session.userId}"/>`,
-        '{user}': user?.name || session.userId,
-        '{guild}': guild?.name || session.guildId,
+        '{userName}': user?.name || session.userId,
+        '{userId}': session.userId,
+        '{guildName}': guild?.name || session.guildId,
+        '{guildId}': session.guildId,
       };
-      const message = messageTemplate.replace(/{at}|{user}|{guild}/g, (match) => replacements[match]);
+      const regex = new RegExp(Object.keys(replacements).join('|'), 'g');
+      const message = messageTemplate.replace(regex, (match) => replacements[match]);
       if (message.trim()) await session.bot.sendMessage(session.guildId, message);
     } catch (error) {
       this.logger.error('发送入群欢迎失败:', error);
@@ -107,50 +112,59 @@ export class OnebotRequest {
    */
   private async handleMemberRemoved(session: Session): Promise<void> {
     try {
-      const isBot = session.userId === session.selfId;
-      const operator = session.operatorId ? await session.bot.getUser(session.operatorId).catch(() => null) : null;
-      if (isBot) {
-        if (this.config.enableNotify && this.config.notifyTarget) {
-          const [targetType, targetId] = this.config.notifyTarget.split(':');
-          const guild = await session.bot.getGuild(session.guildId).catch(() => null);
-          const guildName = guild?.name ? `${guild.name} (${session.guildId})` : session.guildId;
-          let causeMessage: string;
-          if (operator && operator.id !== session.selfId) {
-              const operatorName = operator.name ? `${operator.name} (${operator.id})` : operator.id;
-              causeMessage = `已被 ${operatorName} 移出`;
-          } else {
-              causeMessage = '已退出';
-          }
-          const botMessage = `${causeMessage}群组 ${guildName}`;
-          if (targetType === 'private' && targetId) {
-              await session.bot.sendPrivateMessage(targetId, botMessage);
-          } else if (targetType === 'guild' && targetId) {
-              await session.bot.sendMessage(targetId, botMessage);
-          }
-        }
-        return;
-      }
-      if (!this.config.enableLeaveMsg) return;
       const user = await session.bot.getUser(session.userId).catch(() => null);
       const guild = await session.bot.getGuild(session.guildId).catch(() => null);
-      const isKick = operator && operator.id !== session.userId;
-      let message: string;
       const customMessageTemplate = this.config.leaveMessage;
-      if (customMessageTemplate) {
+      if (customMessageTemplate && customMessageTemplate.trim()) {
         const replacements = {
-            '{at}': `<at userId="${session.userId}"/>`,
-            '{user}': user?.name || session.userId,
-            '{guild}': guild?.name || session.guildId,
-            '{atop}': isKick ? `<at userId="${session.operatorId}"/>` : '',
-            '{op}': isKick ? (operator?.name || session.operatorId) : '',
+          '{userName}': user?.name || session.userId,
+          '{userId}': session.userId,
+          '{guildName}': guild?.name || session.guildId,
+          '{guildId}': session.guildId,
         };
-        message = customMessageTemplate.replace(/{at}|{user}|{guild}|{atop}|{op}/g, (match) => replacements[match]);
+        const regex = new RegExp(Object.keys(replacements).join('|'), 'g');
+        const message = customMessageTemplate.replace(regex, (match) => replacements[match]);
+        if (message.trim()) await session.bot.sendMessage(session.guildId, message);
       }
-      if (message.trim()) await session.bot.sendMessage(session.guildId, message);
     } catch (error) {
       this.logger.error('发送退群提示失败:', error);
     }
   }
+
+  /**
+   * 处理机器人被踢或主动退群事件
+   */
+  private async handleBotRemoved(session: Session): Promise<void> {
+    const { enableNotify = false, notifyTarget = '' } = this.config;
+    if (!enableNotify || !notifyTarget) return;
+    const [targetType, targetId] = notifyTarget.split(':');
+    if (!targetId || (targetType !== 'guild' && targetType !== 'private')) {
+      this.logger.warn(`通知目标错误: ${notifyTarget}`);
+      return;
+    }
+    try {
+      const subType = session.event?._data?.sub_type;
+      const operatorId = session.event.operator?.id || session.event?._data?.operator_id;
+      const guildId = session.guildId;
+      const guild = await session.bot.getGuild(guildId).catch(() => null);
+      const guildIdentifier = guild?.name ? `${guild.name}(${guildId})` : guildId;
+      let msg = '';
+      if (subType === 'kick_me' && operatorId) {
+        const operator = await session.bot.getUser(operatorId.toString()).catch(() => null);
+        const operatorIdentifier = operator?.name ? `${operator.name}(${operatorId})` : operatorId;
+        msg = `已被 ${operatorIdentifier} 踢出群组 ${guildIdentifier}`;
+      } else {
+        msg = `已退出群组 ${guildIdentifier}`;
+      }
+      const sendFunc = targetType === 'private'
+        ? (m) => session.bot.sendPrivateMessage(targetId, m)
+        : (m) => session.bot.sendMessage(targetId, m);
+      await sendFunc(msg);
+    } catch (error) {
+      this.logger.error(`发送被踢/退群通知失败:`, error);
+    }
+  }
+
 
   /**
    * 生成请求的唯一键
@@ -163,16 +177,15 @@ export class OnebotRequest {
   }
 
   /**
-   * 取消活动中的请求
+   * 清理并取消一个活动中的请求
    * @param requestKey - 请求唯一键
    */
-  private cancelActiveRequest(requestKey: string): void {
+  private cleanupActiveRequest(requestKey: string): void {
     const activeRequest = this.activeRequests.get(requestKey);
     if (!activeRequest) return;
     activeRequest.disposer?.();
     if (activeRequest.timeoutTimer) clearTimeout(activeRequest.timeoutTimer);
-    // 清理请求编号映射
-    if (activeRequest.requestNumber !== undefined) this.requestNumberMap.delete(activeRequest.requestNumber);
+    this.requestNumberMap.delete(activeRequest.requestNumber);
     this.activeRequests.delete(requestKey);
   }
 
@@ -183,16 +196,13 @@ export class OnebotRequest {
    */
   public async processRequest(session: Session, type: RequestType): Promise<void> {
     const requestKey = this.getRequestKey(session, type);
-    this.cancelActiveRequest(requestKey);
+    this.cleanupActiveRequest(requestKey);
     const requestMode = this.config[`${type}Request`] as Request || 'reject';
     const needsNotification = requestMode === 'manual' || requestMode === 'auto';
     let notificationSent = false;
     try {
-      // 发送通知
       if (needsNotification) notificationSent = await this.setupNotification(session, type, requestKey, requestMode === 'manual');
-      // 处理请求
       if (requestMode === 'manual' && notificationSent) return;
-      // 自动处理
       let approve = false;
       let reason = '';
       if (requestMode === 'accept') {
@@ -211,17 +221,8 @@ export class OnebotRequest {
         await this.processRequestAction(session, type, false, '处理出错');
       } catch {}
     } finally {
-      if (requestMode !== 'manual' || !notificationSent) this.cleanupRequest(requestKey);
+      if (requestMode !== 'manual' || !notificationSent) this.cleanupActiveRequest(requestKey);
     }
-  }
-
-  /**
-   * 清理请求数据
-   * @param requestId - 请求 ID
-   */
-  private cleanupRequest(requestId: string): void {
-    this.pendingRequests.delete(requestId);
-    for (const [num, id] of this.requestNumberMap.entries()) if (id === requestId) this.requestNumberMap.delete(num);
   }
 
   /**
@@ -344,19 +345,14 @@ export class OnebotRequest {
     const { enableNotify = false, notifyTarget = '' } = this.config;
     if (!enableNotify || !notifyTarget) return false;
     const [targetType, targetId] = notifyTarget.split(':');
-    const isPrivate = targetType?.toLowerCase() === 'private';
     if (!targetId || (targetType !== 'guild' && targetType !== 'private')) {
       this.logger.warn(`通知目标错误: ${notifyTarget}`);
       return false;
     }
+    const requestNumber = this.nextRequestNumber++;
+    this.requestNumberMap.set(requestNumber, requestId);
+    this.activeRequests.set(requestId, { session, type, requestNumber });
     try {
-      const requestNumber = this.nextRequestNumber++;
-      this.requestNumberMap.set(requestNumber, requestId);
-      if (!this.activeRequests.has(requestId)) {
-        this.activeRequests.set(requestId, { requestNumber });
-      } else {
-        this.activeRequests.get(requestId).requestNumber = requestNumber;
-      }
       const eventData = session.event?._data || {};
       let user = null, guild = null, operator = null;
       user = await session.bot.getUser?.(session.userId)?.catch(() => null) ?? null;
@@ -364,7 +360,6 @@ export class OnebotRequest {
       if (type === 'guild' && eventData.operator_id && eventData.operator_id !== session.userId) {
         operator = await session.bot.getUser?.(eventData.operator_id.toString())?.catch(() => null) ?? null;
       }
-      // 构建消息
       const isDirectBotJoin = type === 'guild' && eventData.sub_type !== 'invite' && session.userId === session.selfId;
       let msg = user?.avatar ? `<image url="${user.avatar}"/>\n` : '';
       msg += `类型：${type === 'friend' ? '好友申请' : type === 'member' ? '加群请求' :
@@ -376,18 +371,14 @@ export class OnebotRequest {
       const requestMode = this.config[`${type}Request`] as Request || 'reject';
       msg += `处理模式：${isManualMode ? '人工审核' : requestMode === 'auto' ? '自动审核' :
               requestMode === 'accept' ? '自动通过' : '自动拒绝'}\n`;
-      // 发送消息
-      const sendFunc = isPrivate
+      const sendFunc = targetType === 'private'
         ? (m) => session.bot.sendPrivateMessage(targetId, m)
         : (m) => session.bot.sendMessage(targetId, m);
       await sendFunc(msg);
-      if (isManualMode) {
-        this.pendingRequests.set(requestId, { session, type });
-        this.setupPromptResponse(session, type, requestId, requestNumber, targetId, isPrivate);
-      }
+      if (isManualMode) this.setupPromptResponse(requestId, requestNumber, targetId, targetType === 'private');
       return true;
     } catch (error) {
-      this.logger.error(`通知发送失败: ${error}`);
+      this.logger.error(`发送请求通知失败:`, error);
       return false;
     }
   }
@@ -395,20 +386,22 @@ export class OnebotRequest {
   /**
    * 设置人工审核响应监听
    */
-  private async setupPromptResponse(session: Session, type: RequestType, requestId: string,
-    requestNumber: number, targetId: string, isPrivate: boolean) {
+  private async setupPromptResponse(requestId: string, requestNumber: number, targetId: string, isPrivate: boolean) {
+    const activeRequest = this.activeRequests.get(requestId);
+    if (!activeRequest) return;
+
+    const { session, type } = activeRequest;
     const sendFunc = isPrivate
       ? (msg) => session.bot.sendPrivateMessage(targetId, msg)
       : (msg) => session.bot.sendMessage(targetId, msg);
     await sendFunc(`请回复以下命令处理请求 #${requestNumber}：\n通过[y]${requestNumber} [备注] | 拒绝[n]${requestNumber} [理由]`);
     let disposed = false;
     const disposer = this.ctx.middleware(async (s, next) => {
-      if (disposed || (s.userId !== targetId && s.guildId !== targetId)) return next();
+      if (disposed || (isPrivate ? s.userId !== targetId : s.guildId !== targetId)) return next();
       const match = s.content.trim().match(new RegExp(`^(y|n|通过|拒绝)(${requestNumber})\\s*(.*)$`));
       if (!match) return next();
       disposed = true;
-      disposer();
-      this.cleanupRequest(requestId);
+      this.cleanupActiveRequest(requestId);
       const isApprove = match[1] === 'y' || match[1] === '通过';
       const extraContent = match[3]?.trim() || '';
       try {
@@ -420,21 +413,17 @@ export class OnebotRequest {
         this.logger.error(`响应处理失败: ${error}`);
         await sendFunc(`处理请求 #${requestNumber} 失败: ${error.message || '未知错误'}`);
       }
-      this.activeRequests.delete(requestId);
     });
-    // 保存中间件卸载
-    const activeRequest = this.activeRequests.get(requestId) || {};
     activeRequest.disposer = disposer;
-    this.activeRequests.set(requestId, activeRequest);
     const timeoutMin = typeof this.config.manualTimeout === 'number' ? this.config.manualTimeout : 60;
-    const timeoutAction = (this.config.manualTimeoutAction === 'accept' || this.config.manualTimeoutAction === 'reject')
-      ? this.config.manualTimeoutAction : 'reject';
     if (timeoutMin > 0) {
-      const timeoutTimer = setTimeout(async () => {
+      const timeoutAction = (this.config.manualTimeoutAction === 'accept' || this.config.manualTimeoutAction === 'reject')
+        ? this.config.manualTimeoutAction : 'reject';
+      activeRequest.timeoutTimer = setTimeout(async () => {
         if (disposed) return;
         disposed = true;
-        disposer();
-        this.cleanupRequest(requestId);
+
+        this.cleanupActiveRequest(requestId);
         try {
           await this.processRequestAction(session, type, timeoutAction === 'accept',
             timeoutAction === 'reject' ? '请求处理超时，已自动拒绝' : '');
@@ -442,11 +431,7 @@ export class OnebotRequest {
         } catch (e) {
           this.logger.error(`超时处理失败: ${e}`);
         }
-        this.activeRequests.delete(requestId);
       }, timeoutMin * 60 * 1000);
-      // 保存定时器引用
-      activeRequest.timeoutTimer = timeoutTimer;
-      this.activeRequests.set(requestId, activeRequest);
     }
   }
 
@@ -454,7 +439,6 @@ export class OnebotRequest {
    * 注册事件监听器，自动处理 OneBot 请求和成员变动事件
    */
   public registerEventListeners(): void {
-    // 监听请求类事件
     if (this.config.enable) {
       const handleRequest = (type: RequestType) => async (session: Session) => {
         const data = session.event?._data || {};
@@ -467,9 +451,8 @@ export class OnebotRequest {
       this.ctx.on('guild-member-request', handleRequest('member'));
       this.ctx.on('guild-added', handleRequest('guild'));
     }
-    // 监听入群事件
     if (this.config.enableJoin) this.ctx.on('guild-member-added', this.handleMemberAdded.bind(this));
-    // 监听退群事件
     if (this.config.enableLeave) this.ctx.on('guild-member-removed', this.handleMemberRemoved.bind(this));
+    if (this.config.enableKick) this.ctx.on('guild-removed', this.handleBotRemoved.bind(this));
   }
 }
