@@ -28,6 +28,7 @@ export interface Config {
   enableLeave?: boolean
   leaveMessage?: string
   enableKick?: boolean
+  commandWhitelist?: string[]
   FriendLevel?: number
   FriendRequestAutoRegex?: string
   MemberRequestAutoRules?: { guildId: string; keyword: string; minLevel: number }[]
@@ -46,6 +47,7 @@ export const Config: Schema<Config> = Schema.intersect([
     enableLeave: Schema.boolean().description('开启退群监听').default(false),
     joinMessage: Schema.string().default('欢迎 {userName} 加入本群！').description('自定义入群欢迎'),
     leaveMessage: Schema.string().default('{userName} 已离开本群').description('自定义退群提示'),
+    commandWhitelist: Schema.array(String).description('命令白名单').role('table'),
   }).description('基础配置'),
   Schema.object({
     notifyTarget: Schema.string().description('通知目标(guild/private:number)').required(),
@@ -74,5 +76,5 @@ export function apply(ctx: Context, config: Config = {}) {
   const logger = ctx.logger('onebot-manager')
   new OnebotRequest(ctx, logger, config).registerEventListeners()
   const qgroup = ctx.command('qgroup', 'QQ 群管').usage('群管相关功能，需要管理权限')
-  registerCommands(qgroup, logger, utils)
+  registerCommands(qgroup, logger, utils, config.commandWhitelist || [])
 }

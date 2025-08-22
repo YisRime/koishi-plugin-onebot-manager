@@ -152,15 +152,10 @@ export class OnebotRequest {
    */
   private async shouldAutoAccept(session: Session, type: RequestType): Promise<boolean | string> {
     const validationMessage = session.event?._data?.comment || '';
-
     if (type === 'member') {
       const { MemberRequestAutoRules = [] } = this.config;
-      // 查找当前群组的专属规则
       const rule = MemberRequestAutoRules.find(r => r.guildId === session.guildId);
-      // 如果没有为该群配置任何规则，则直接转为手动
       if (!rule) return false;
-
-      // 1. 检查关键词规则
       if (rule.keyword) {
         try {
           if (new RegExp(rule.keyword).test(validationMessage)) return true;
@@ -168,32 +163,25 @@ export class OnebotRequest {
           this.logger.warn(`群 ${rule.guildId} 正则无效: ${rule.keyword}`);
         }
       }
-
-      // 2. 检查最低等级规则
       if (rule.minLevel >= 0) {
         try {
           const userInfo = await session.onebot.getStrangerInfo(Number(session.userId), false) as OneBotUserInfo;
           if ((userInfo.level || 0) < rule.minLevel) return `QQ 等级低于${rule.minLevel}级`;
-          // 等级满足条件，自动通过
           return true;
         } catch (error) {
           return `获取用户信息失败: ${error}`;
         }
       }
     }
-
     if (type === 'friend') {
       const { FriendRequestAutoRegex, FriendLevel = -1 } = this.config;
       if (FriendRequestAutoRegex) {
         try {
-          if (new RegExp(FriendRequestAutoRegex).test(validationMessage)) {
-            return true;
-          }
+          if (new RegExp(FriendRequestAutoRegex).test(validationMessage)) return true;
         } catch (e) {
           this.logger.warn(`好友申请正则无效: ${FriendRequestAutoRegex}`);
         }
       }
-
       if (FriendLevel < 0) return false;
       try {
         const userInfo = await session.onebot.getStrangerInfo(Number(session.userId), false) as OneBotUserInfo;
@@ -203,7 +191,6 @@ export class OnebotRequest {
         return `获取用户信息失败: ${error}`;
       }
     }
-
     if (type === 'guild') {
       const { GuildAllowUsers = [], GuildMinMemberCount = -1, GuildMaxCapacity = -1 } = this.config;
       if (GuildAllowUsers.includes(session.userId)) return true;
@@ -221,7 +208,6 @@ export class OnebotRequest {
         }
       }
     }
-
     return false;
   }
 

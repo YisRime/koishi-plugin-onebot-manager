@@ -59,10 +59,10 @@ async function getTargetId(target: any, session: any, utils: any, groupId: numbe
 /**
  * 创建标准命令处理函数
  */
-function createCommandAction(utils: any, logger: Logger, botRoles: string[], userRoles: string[],
+function createCommandAction(utils: any, logger: Logger, botRoles: string[], userRoles: string[], commandWhitelist: string[],
     actionFn: (session: any, options: any, ...args: any[]) => Promise<any>) {
   return ({ session, options }, ...args) =>
-    utils.withRoleCheck(session, logger, botRoles, userRoles,
+    utils.withRoleCheck(session, logger, botRoles, userRoles, commandWhitelist,
       () => {
         try {
           return actionFn(session, options, ...args);
@@ -76,8 +76,8 @@ function createCommandAction(utils: any, logger: Logger, botRoles: string[], use
 /**
  * 群管理设置/取消操作
  */
-function adminAction(set: boolean, utils: any, logger: Logger) {
-  return createCommandAction(utils, logger, ['owner'], ['owner', 'admin'],
+function adminAction(set: boolean, utils: any, logger: Logger, commandWhitelist: string[]) {
+  return createCommandAction(utils, logger, ['owner'], ['owner', 'admin'], commandWhitelist,
     async (session, options, target) => {
       if (!target) return '请指定成员';
       const groupId = getGroupId(options, session);
@@ -92,12 +92,12 @@ function adminAction(set: boolean, utils: any, logger: Logger) {
 /**
  * 注册所有群管相关命令
  */
-export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
+export function registerCommands(qgroup: Command, logger: Logger, utils: any, commandWhitelist: string[]) {
   // 设置专属头衔
   qgroup.subcommand('tag [title:string] [target]', '设置专属头衔')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置或清除指定成员的群头衔\n使用引号添加不连续的内容，最多18字符\n英文(标点)和数字1字符，中文和其他符号3字符，Emoji6字符')
-    .action(createCommandAction(utils, logger, ['owner'], [],
+    .action(createCommandAction(utils, logger, ['owner'], [], commandWhitelist,
       async (session, options, title = '', target) => {
         if (title && getTitleLen(title) > 18) return '设置头衔失败: 长度超过18字符';
         const groupId = getGroupId(options, session);
@@ -111,7 +111,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
   qgroup.subcommand('membercard [card:string] [target]', '设置群名片')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置或清除指定成员的群名片')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
+    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
       async (session, options, card = '', target) => {
         const groupId = getGroupId(options, session);
         const targetId = await getTargetId(target, session, utils, groupId, !!target);
@@ -124,7 +124,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
   qgroup.subcommand('groupname <group_name:string>', '设置群名称')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置当前群的名称')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
+    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
       async (session, options, group_name) => {
         if (!group_name) return '请输入群名';
         const groupId = getGroupId(options, session);
@@ -137,7 +137,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
   const essence = qgroup.subcommand('essence [messageId:string]', '设置精华消息')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置指定消息为精华消息')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
+    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
       async (session, messageId) => {
         messageId = messageId || session.quote?.id;
         if (!messageId) return '请提供消息ID或引用消息';
@@ -150,7 +150,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
   essence.subcommand('.del [messageId:string]', '移除精华消息')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('移除指定消息的精华消息')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
+    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
       async (session, messageId) => {
         messageId = messageId || session.quote?.id;
         if (!messageId) return '请提供消息ID或引用消息';
@@ -163,20 +163,20 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
   const admin = qgroup.subcommand('admin <target>', '设置群管理')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置指定成员为群管理')
-    .action(adminAction(true, utils, logger));
+    .action(adminAction(true, utils, logger, commandWhitelist));
 
   // 取消群管理
   admin.subcommand('.del <target>', '取消群管理')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('取消指定成员的群管理')
-    .action(adminAction(false, utils, logger));
+    .action(adminAction(false, utils, logger, commandWhitelist));
 
   // 禁言群成员
   const mute = qgroup.subcommand('mute <target> [duration]', '禁言群成员')
     .option('cancel', '-c, --cancel 取消禁言')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('禁言指定成员，默认 30 分钟，最长 30 天')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
+    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
       async (session, options, target, duration) => {
         const groupId = getGroupId(options, session);
         const targetId = utils.parseTarget(target);
@@ -194,7 +194,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
   mute.subcommand('.all [enable:boolean]', '全体禁言')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('开启或关闭全体禁言')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
+    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
       async (session, options, enable) => {
         const val = typeof enable === 'boolean' ? enable : true;
         const groupId = getGroupId(options, session);
@@ -208,7 +208,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
     .option('reject', '-r, --reject 拒绝再次加群')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('逐出指定成员，使用 -r 拒绝此人再次加群')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'],
+    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
       async (session, options, target) => {
         const targetId = utils.parseTarget(target);
         if (!targetId) return '请指定有效的成员';
@@ -222,7 +222,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any) {
   qgroup.subcommand('revoke', '撤回消息')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('撤回指定回复消息（仅限撤回自己的消息）')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], [],
+    .action(createCommandAction(utils, logger, ['owner', 'admin'], [], commandWhitelist,
       async (session) => {
         const messageId = session.quote?.id;
         if (!messageId) return '请回复需要撤回的消息';

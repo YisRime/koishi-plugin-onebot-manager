@@ -55,7 +55,7 @@ export const utils = {
    * 包装函数，执行前检查机器人和用户的群权限
    */
   withRoleCheck<T extends any[], R>(session: Session, logger: Logger, requiredBotRoles: string[] = [],
-    requiredUserRoles: string[] = [], fn: (...args: T) => Promise<R>) {
+    requiredUserRoles: string[] = [], commandWhitelist: string[] = [], fn: (...args: T) => Promise<R>) {
     return (...args: T): Promise<R | null> =>
       utils.checkPermission(session, logger).then(({ bot, user }) => {
         // 检查权限并构建错误列表
@@ -64,8 +64,10 @@ export const utils = {
         if (requiredBotRoles.length && (!bot || !requiredBotRoles.includes(bot))) {
           errors.push(`需要${requiredBotRoles.map(getRoleName).join('或')}（当前为${getRoleName(bot)}）`);
         }
-        // 检查用户权限
-        if (requiredUserRoles.length && (!user || !requiredUserRoles.includes(user))) {
+        // 检查用户是否在白名单中
+        const isWhitelisted = commandWhitelist.includes(session.userId);
+        // 检查用户权限 (如果不在白名单内)
+        if (!isWhitelisted && requiredUserRoles.length && (!user || !requiredUserRoles.includes(user))) {
           errors.push(`用户需要${requiredUserRoles.map(getRoleName).join('或')}（当前为${getRoleName(user)}）`);
         }
         // 如有错误则返回
