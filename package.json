@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-onebot-manager",
   "description": "适用于 Onebot 的 QQ 群管，可自动处理好友申请、群邀请和入群请求，提供群组管理功能",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "contributors": [
     "Yis_Rime <yis_rime@outlook.com>"
   ],

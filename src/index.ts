@@ -29,9 +29,8 @@ export interface Config {
   leaveMessage?: string
   enableKick?: boolean
   FriendLevel?: number
-  FriendRequestAutoKeyword?: string
-  MemberLevel?: number
-  MemberRequestAutoRules?: { guildId: string; keyword: string }[]
+  FriendRequestAutoRegex?: string
+  MemberRequestAutoRules?: { guildId: string; keyword: string; minLevel: number }[]
   GuildAllowUsers?: string[]
   GuildMinMemberCount?: number
   GuildMaxCapacity?: number
@@ -59,15 +58,15 @@ export const Config: Schema<Config> = Schema.intersect([
   }).description('请求配置'),
   Schema.object({
     FriendLevel: Schema.number().description('好友申请等级').default(-1).min(-1).max(256),
-    MemberLevel: Schema.number().description('加群最低等级').default(-1).min(-1).max(256),
-    GuildMinMemberCount: Schema.number().description('最低群成员数量').default(-1).min(-1).max(3000),
-    GuildMaxCapacity: Schema.number().description('最低被邀请群容量').default(-1).min(-1).max(3000),
-    FriendRequestAutoKeyword: Schema.string().description('好友申请关键词'),
+    GuildMinMemberCount: Schema.number().description('最低群成员数').default(-1).min(-1).max(3000),
+    GuildMaxCapacity: Schema.number().description('最低受邀容量').default(-1).min(-1).max(3000),
+    FriendRequestAutoRegex: Schema.string().description('好友申请正则'),
+    GuildAllowUsers: Schema.array(String).description('额外邀群白名'),
     MemberRequestAutoRules: Schema.array(Schema.object({
       guildId: Schema.string().description('群号'),
       keyword: Schema.string().description('正则'),
-    })).description('加群关键词规则').role('table'),
-    GuildAllowUsers: Schema.array(String).description('邀请加群白名单'),
+      minLevel: Schema.number().description('等级').default(-1),
+    })).description('加群自动审批').role('table'),
   }).description('条件配置'),
 ])
 

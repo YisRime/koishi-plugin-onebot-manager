@@ -152,30 +152,48 @@ export class OnebotRequest {
    */
   private async shouldAutoAccept(session: Session, type: RequestType): Promise<boolean | string> {
     const validationMessage = session.event?._data?.comment || '';
+
     if (type === 'member') {
-      const { MemberRequestAutoRules = [], MemberLevel = -1 } = this.config;
-      const rule = MemberRequestAutoRules.find(r => r.guildId === session.guildId && r.keyword);
-      if (rule) {
+      const { MemberRequestAutoRules = [] } = this.config;
+      // 查找当前群组的专属规则
+      const rule = MemberRequestAutoRules.find(r => r.guildId === session.guildId);
+      // 如果没有为该群配置任何规则，则直接转为手动
+      if (!rule) return false;
+
+      // 1. 检查关键词规则
+      if (rule.keyword) {
         try {
           if (new RegExp(rule.keyword).test(validationMessage)) return true;
         } catch (e) {
           this.logger.warn(`群 ${rule.guildId} 正则无效: ${rule.keyword}`);
         }
       }
-      if (MemberLevel < 0) return false;
-      try {
-        const userInfo = await session.onebot.getStrangerInfo(Number(session.userId), false) as OneBotUserInfo;
-        if ((userInfo.level || 0) < MemberLevel) return `QQ 等级低于${MemberLevel}级`;
-        return true;
-      } catch (error) {
-        return `获取用户信息失败: ${error}`;
+
+      // 2. 检查最低等级规则
+      if (rule.minLevel >= 0) {
+        try {
+          const userInfo = await session.onebot.getStrangerInfo(Number(session.userId), false) as OneBotUserInfo;
+          if ((userInfo.level || 0) < rule.minLevel) return `QQ 等级低于${rule.minLevel}级`;
+          // 等级满足条件，自动通过
+          return true;
+        } catch (error) {
+          return `获取用户信息失败: ${error}`;
+        }
       }
     }
+
     if (type === 'friend') {
-      const { FriendRequestAutoKeyword, FriendLevel = -1 } = this.config;
-      if (FriendRequestAutoKeyword && validationMessage.includes(FriendRequestAutoKeyword)) {
-        return true;
+      const { FriendRequestAutoRegex, FriendLevel = -1 } = this.config;
+      if (FriendRequestAutoRegex) {
+        try {
+          if (new RegExp(FriendRequestAutoRegex).test(validationMessage)) {
+            return true;
+          }
+        } catch (e) {
+          this.logger.warn(`好友申请正则无效: ${FriendRequestAutoRegex}`);
+        }
       }
+
       if (FriendLevel < 0) return false;
       try {
         const userInfo = await session.onebot.getStrangerInfo(Number(session.userId), false) as OneBotUserInfo;
@@ -185,6 +203,7 @@ export class OnebotRequest {
         return `获取用户信息失败: ${error}`;
       }
     }
+
     if (type === 'guild') {
       const { GuildAllowUsers = [], GuildMinMemberCount = -1, GuildMaxCapacity = -1 } = this.config;
       if (GuildAllowUsers.includes(session.userId)) return true;
@@ -202,6 +221,7 @@ export class OnebotRequest {
         }
       }
     }
+
     return false;
   }
 
@@ -289,9 +309,32 @@ export class OnebotRequest {
         ? (m) => session.bot.sendPrivateMessage(targetId, m)
         : (m) => session.bot.sendMessage(targetId, m);
       await sendFunc(msgLines.join('\n'));
-      await sendFunc(`请回复以下命令处理请求 #${requestNumber}：\n通过[y]${requestNumber} [备注] | 拒绝[n]${requestNumber} [理由]`);
+      await sendFunc(`请回复以下命令处理请求 #${requestNumber}：\n通过[y/ya]${requestNumber} [备注] | 拒绝[n/na]${requestNumber} [理由]`);
       activeRequest.disposer = this.ctx.middleware(async (s, next) => {
         if (activeRequest.disposer && (targetType === 'private' ? s.userId !== targetId : s.guildId !== targetId)) return next();
+        const bulkMatch = s.content.trim().match(/^(ya|na|全部同意|全部拒绝)\s*(.*)$/);
+        if (bulkMatch && this.activeRequests.size > 0) {
+            const requestsToProcess = [...this.activeRequests.values()];
+            this.activeRequests.clear();
+            this.requestNumberMap.clear();
+            const isApprove = bulkMatch[1] === 'ya' || bulkMatch[1] === '全部同意';
+            const extraContent = bulkMatch[2]?.trim() || '';
+            let successCount = 0;
+            for (const req of requestsToProcess) {
+                req.disposer?.();
+                if (req.timeoutTimer) clearTimeout(req.timeoutTimer);
+                try {
+                    const reason = !isApprove ? extraContent : '';
+                    const remark = isApprove && req.type === 'friend' ? extraContent : '';
+                    await this.processRequestAction(req.session, req.type, isApprove, reason, remark);
+                    successCount++;
+                } catch (error) {
+                    this.logger.error(`批量处理请求 #${req.requestNumber} 失败: ${error}`);
+                }
+            }
+            if (successCount > 0) await sendFunc(`已批量${isApprove ? '通过' : '拒绝'} ${successCount} 个请求${extraContent ? `，理由/备注：${extraContent}` : ''}`);
+            return;
+        }
         const match = s.content.trim().match(new RegExp(`^(y|n|通过|拒绝)(${requestNumber})\\s*(.*)$`));
         if (!match) return next();
         this.cleanupActiveRequest(requestId);
