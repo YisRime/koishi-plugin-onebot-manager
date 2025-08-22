@@ -63,62 +63,6 @@ export class OnebotRequest {
   ) {}
 
   /**
-   * 发送群成员变动通知
-   */
-  private async sendGuildMemberUpdateMessage(session: Session, messageTemplate: string): Promise<void> {
-    if (!messageTemplate || !messageTemplate.trim()) return;
-    try {
-      const user = await session.bot.getUser(session.userId).catch(() => null);
-      const guild = await session.bot.getGuild(session.guildId).catch(() => null);
-      const replacements = {
-        '{userName}': user?.name || session.userId,
-        '{userId}': session.userId,
-        '{guildName}': guild?.name || session.guildId,
-        '{guildId}': session.guildId,
-      };
-      const regex = new RegExp(Object.keys(replacements).join('|'), 'g');
-      const message = messageTemplate.replace(regex, (match) => replacements[match]);
-      if (message.trim()) await session.bot.sendMessage(session.guildId, message);
-    } catch (error) {
-      this.logger.error('发送群成员变动通知失败:', error);
-    }
-  }
-
-  /**
-   * 处理机器人被踢或主动退群事件
-   */
-  private async handleBotRemoved(session: Session): Promise<void> {
-    const { notifyTarget = '' } = this.config;
-    if (!notifyTarget) return;
-    const [targetType, targetId] = notifyTarget.split(':');
-    if (!targetId || (targetType !== 'guild' && targetType !== 'private')) {
-      this.logger.warn(`通知目标错误: ${notifyTarget}`);
-      return;
-    }
-    try {
-      const subType = session.event?._data?.sub_type;
-      const operatorId = session.event.operator?.id || session.event?._data?.operator_id;
-      const guildId = session.guildId;
-      const guild = await session.bot.getGuild(guildId).catch(() => null);
-      const guildIdentifier = guild?.name ? `${guild.name}(${guildId})` : guildId;
-      let msg = '';
-      if (subType === 'kick_me' && operatorId) {
-        const operator = await session.bot.getUser(operatorId.toString()).catch(() => null);
-        const operatorIdentifier = operator?.name ? `${operator.name}(${operatorId})` : operatorId;
-        msg = `已被 ${operatorIdentifier} 踢出群组 ${guildIdentifier}`;
-      } else {
-        msg = `已退出群组 ${guildIdentifier}`;
-      }
-      const sendFunc = targetType === 'private'
-        ? (m) => session.bot.sendPrivateMessage(targetId, m)
-        : (m) => session.bot.sendMessage(targetId, m);
-      await sendFunc(msg);
-    } catch (error) {
-      this.logger.error(`发送被踢/退群通知失败:`, error);
-    }
-  }
-
-  /**
    * 清理并取消一个活动中的请求
    */
   private cleanupActiveRequest(requestKey: string): void {
@@ -137,9 +81,13 @@ export class OnebotRequest {
     const requestKey = type === 'friend' ? `friend:${session.userId}` : type === 'guild' ? `guild:${session.guildId}` : `member:${session.userId}:${session.guildId}`;
     this.cleanupActiveRequest(requestKey);
     try {
-      if ((await this.shouldAutoAccept(session, type)) === true) {
+      const autoAcceptResult = await this.shouldAutoAccept(session, type);
+      if (autoAcceptResult === true) {
         await this.processRequestAction(session, type, true);
-      } else {
+      } else if (typeof autoAcceptResult === 'string') {
+        await this.processRequestAction(session, type, false, autoAcceptResult);
+      }
+      else {
         await this.setupNotification(session, type, requestKey);
       }
     } catch (error) {
@@ -315,10 +263,10 @@ export class OnebotRequest {
                     await this.processRequestAction(req.session, req.type, isApprove, reason, remark);
                     successCount++;
                 } catch (error) {
-                    this.logger.error(`批量处理请求 #${req.requestNumber} 失败: ${error}`);
+                    this.logger.error(`处理请求 #${req.requestNumber} 失败: ${error}`);
                 }
             }
-            if (successCount > 0) await sendFunc(`已批量${isApprove ? '通过' : '拒绝'} ${successCount} 个请求${extraContent ? `，理由/备注：${extraContent}` : ''}`);
+            if (successCount > 0) await sendFunc(`已${isApprove ? '通过' : '拒绝'} ${successCount} 个请求${extraContent ? `，理由/备注：${extraContent}` : ''}`);
             return;
         }
         const match = s.content.trim().match(new RegExp(`^(y|n|通过|拒绝)(${requestNumber})\\s*(.*)$`));
@@ -340,7 +288,7 @@ export class OnebotRequest {
   }
 
   /**
-   * 注册事件监听器
+   * 注册请求类事件监听器
    */
   public registerEventListeners(): void {
     if (this.config.enable) {
@@ -355,12 +303,5 @@ export class OnebotRequest {
       this.ctx.on('guild-member-request', handleRequest('member'));
       this.ctx.on('guild-added', handleRequest('guild'));
     }
-    if (this.config.enableJoin) {
-      this.ctx.on('guild-member-added', (session) => this.sendGuildMemberUpdateMessage(session, this.config.joinMessage));
-    }
-    if (this.config.enableLeave) {
-      this.ctx.on('guild-member-removed', (session) => this.sendGuildMemberUpdateMessage(session, this.config.leaveMessage));
-    }
-    if (this.config.enableKick) this.ctx.on('guild-removed', this.handleBotRemoved.bind(this));
   }
 }

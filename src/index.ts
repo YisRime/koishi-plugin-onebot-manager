@@ -1,6 +1,7 @@
 import { Context, Schema } from 'koishi'
 import {} from "koishi-plugin-adapter-onebot";
 import { OnebotRequest } from './request'
+import { OneBotListener } from './listener'
 import { utils } from './utils'
 import { registerCommands } from './command'
 
@@ -28,6 +29,7 @@ export interface Config {
   enableLeave?: boolean
   leaveMessage?: string
   enableKick?: boolean
+  enableAdmin?: boolean
   commandWhitelist?: string[]
   FriendLevel?: number
   FriendRequestAutoRegex?: string
@@ -41,40 +43,44 @@ export interface Config {
 
 export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
-    enable: Schema.boolean().description('开启请求监听').default(true),
     enableKick: Schema.boolean().description('开启被踢监听').default(true),
+    enableAdmin: Schema.boolean().description('开启管理监听').default(true),
+    notifyTarget: Schema.string().description('通知目标(guild/private:number)').required(),
     enableJoin: Schema.boolean().description('开启入群监听').default(false),
     enableLeave: Schema.boolean().description('开启退群监听').default(false),
-    joinMessage: Schema.string().default('欢迎 {userName} 加入本群！').description('自定义入群欢迎'),
-    leaveMessage: Schema.string().default('{userName} 已离开本群').description('自定义退群提示'),
-    commandWhitelist: Schema.array(String).description('命令白名单').role('table'),
-  }).description('基础配置'),
+    joinMessage: Schema.string().default('{userName} 加入了本群').description('进群提示'),
+    leaveMessage: Schema.string().default('{userName} 离开了本群').description('退群提示'),
+  }).description('监听配置'),
   Schema.object({
-    notifyTarget: Schema.string().description('通知目标(guild/private:number)').required(),
+    enable: Schema.boolean().description('开启请求监听').default(true),
     manualTimeout: Schema.number()
-      .description('超时时长').default(720).min(0),
+      .description('请求超时时长').default(360).min(0),
     manualTimeoutAction: Schema.union([
       Schema.const('accept').description('同意'),
       Schema.const('reject').description('拒绝'),
-    ]).description('超时操作').default('accept'),
-  }).description('请求配置'),
-  Schema.object({
-    FriendLevel: Schema.number().description('好友申请等级').default(-1).min(-1).max(256),
+    ]).description('默认超时操作').default('accept'),
+    FriendLevel: Schema.number().description('最低好友等级').default(-1).min(-1).max(256),
     GuildMinMemberCount: Schema.number().description('最低群成员数').default(-1).min(-1).max(3000),
     GuildMaxCapacity: Schema.number().description('最低受邀容量').default(-1).min(-1).max(3000),
-    FriendRequestAutoRegex: Schema.string().description('好友申请正则'),
-    GuildAllowUsers: Schema.array(String).description('额外邀群白名'),
+    FriendRequestAutoRegex: Schema.string().description('好友验证正则'),
     MemberRequestAutoRules: Schema.array(Schema.object({
       guildId: Schema.string().description('群号'),
       keyword: Schema.string().description('正则'),
       minLevel: Schema.number().description('等级').default(-1),
-    })).description('加群自动审批').role('table'),
-  }).description('条件配置'),
+    })).description('加群验证规则').role('table'),
+    GuildAllowUsers: Schema.array(String).description('额外邀请加群白名单').role('table'),
+  }).description('请求配置'),
+  Schema.object({
+    commandWhitelist: Schema.array(String).description('额外命令使用白名单').role('table'),
+  }).description('命令配置'),
 ])
 
 export function apply(ctx: Context, config: Config = {}) {
   const logger = ctx.logger('onebot-manager')
+  // 注册请求处理
   new OnebotRequest(ctx, logger, config).registerEventListeners()
+  // 注册其他通知
+  new OneBotListener(ctx, logger, config).registerEventListeners()
   const qgroup = ctx.command('qgroup', 'QQ 群管').usage('群管相关功能，需要管理权限')
   registerCommands(qgroup, logger, utils, config.commandWhitelist || [])
 }
