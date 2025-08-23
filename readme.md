@@ -36,6 +36,7 @@ plugins:
     notifyTarget: ''      # [必填] 审核和事件通知的目标，格式为 "guild:群号" 或 "private:QQ号"。
     enableJoin: false     # 开启新成员入群监听。
     enableLeave: false    # 开启群成员退群监听。
+    redirectMsg: false    # 把成员入群和退群通知统一发送到通知目标。
     joinMessage: '{userName} 加入了本群' # 自定义入群欢迎语。
     leaveMessage: '{userName} 离开了本群' # 自定义退群提示。
     # 可用占位符: {userName}, {userId}, {guildName}, {guildId}

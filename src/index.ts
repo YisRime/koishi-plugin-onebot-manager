@@ -28,6 +28,7 @@ export interface Config {
   joinMessage?: string
   enableLeave?: boolean
   leaveMessage?: string
+  redirectMsg?: boolean
   enableKick?: boolean
   enableAdmin?: boolean
   commandWhitelist?: string[]
@@ -48,13 +49,13 @@ export const Config: Schema<Config> = Schema.intersect([
     notifyTarget: Schema.string().description('通知目标(guild/private:number)').required(),
     enableJoin: Schema.boolean().description('开启入群监听').default(false),
     enableLeave: Schema.boolean().description('开启退群监听').default(false),
+    redirectMsg: Schema.boolean().description('汇总变动通知').default(false),
     joinMessage: Schema.string().default('{userName} 加入了本群').description('进群提示'),
     leaveMessage: Schema.string().default('{userName} 离开了本群').description('退群提示'),
   }).description('监听配置'),
   Schema.object({
     enable: Schema.boolean().description('开启请求监听').default(true),
-    manualTimeout: Schema.number()
-      .description('请求超时时长').default(360).min(0),
+    manualTimeout: Schema.number().description('请求超时时长').default(360).min(0),
     manualTimeoutAction: Schema.union([
       Schema.const('accept').description('同意'),
       Schema.const('reject').description('拒绝'),

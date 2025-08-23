@@ -34,7 +34,22 @@ export class OneBotListener {
       };
       const regex = new RegExp(Object.keys(replacements).join('|'), 'g');
       const message = messageTemplate.replace(regex, (match) => replacements[match]);
-      if (message.trim()) await session.bot.sendMessage(session.guildId, message);
+      if (!message.trim()) return;
+
+      if (this.config.redirectMsg && this.config.notifyTarget) {
+        const [targetType, targetId] = this.config.notifyTarget.split(':');
+        if (!targetId || (targetType !== 'guild' && targetType !== 'private')) {
+          this.logger.warn(`通知目标错误: ${this.config.notifyTarget}`);
+          await session.bot.sendMessage(session.guildId, message);
+        } else {
+          const sendFunc = targetType === 'private'
+            ? (m: string) => session.bot.sendPrivateMessage(targetId, m)
+            : (m: string) => session.bot.sendMessage(targetId, m);
+          await sendFunc(message);
+        }
+      } else {
+        await session.bot.sendMessage(session.guildId, message);
+      }
     } catch (error) {
       this.logger.error('发送群成员变动通知失败:', error);
     }
