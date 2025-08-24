@@ -221,16 +221,21 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
   // 撤回消息
   qgroup.subcommand('revoke', '撤回消息')
     .option('group', '-g, --group <groupId> 指定群号')
-    .usage('撤回指定回复消息（仅限撤回自己的消息）')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], [], commandWhitelist,
-      async (session) => {
-        const messageId = session.quote?.id;
-        if (!messageId) return '请回复需要撤回的消息';
-        let senderId = session.quote.user.id;
-        if (senderId && String(senderId) === session.userId) {
-          await session.onebot.deleteMsg(messageId);
-          return '';
-        }
+    .usage('撤回指定回复消息。')
+    .action(async ({ session }) => {
+      const quote = session.quote;
+      if (!quote?.id) return '请回复需要撤回的消息';
+
+      try {
+        const { user: userRole } = await utils.checkPermission(session, logger);
+        const quotedSenderId = quote.user?.id;
+
+        const isManager = userRole === 'owner' || userRole === 'admin';
+        const isBotMessage = quotedSenderId && String(quotedSenderId) === session.selfId;
+
+        if (isManager || isBotMessage) await session.onebot.deleteMsg(quote.id);
+      } catch (error) {
+        return utils.handleError(session, error);
       }
-    ));
+    });
 }

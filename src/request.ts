@@ -75,6 +75,45 @@ export class OnebotRequest {
   }
 
   /**
+   * 发送请求通知
+   */
+  private async sendRequestNotification(session: Session, type: RequestType, status: 'pending' | 'approved' | 'rejected', details: { requestNumber?: number; reason?: string } = {}): Promise<void> {
+    const { notifyTarget = '' } = this.config;
+    if (!notifyTarget) return;
+
+    const [targetType, targetId] = notifyTarget.split(':');
+    if (!targetId || (targetType !== 'guild' && targetType !== 'private')) {
+      this.logger.warn(`通知目标错误: ${notifyTarget}`);
+      return;
+    }
+
+    try {
+      const eventData = session.event?._data || {};
+      const user = await session.bot.getUser?.(session.userId)?.catch(() => null) ?? { name: session.userId };
+      const guild = type !== 'friend' ? await session.bot.getGuild?.(session.guildId)?.catch(() => null) ?? null : null;
+      const operator = type === 'guild' && eventData.operator_id && eventData.operator_id !== session.userId
+        ? await session.bot.getUser?.(eventData.operator_id.toString())?.catch(() => null) ?? null : null;
+
+      const msgLines = [];
+      if (user?.avatar) msgLines.push(`<image url="${user.avatar}"/>`);
+      msgLines.push(`类型：${type === 'friend' ? '好友申请' : type === 'member' ? '加群请求' : eventData.sub_type === 'invite' ? '群邀请' : '直接入群'}`);
+      if (session.userId && !(type === 'guild' && eventData.sub_type !== 'invite' && session.userId === session.selfId)) msgLines.push(`用户：${user?.name ? `${user.name}(${session.userId})` : session.userId}`);
+      if (operator) msgLines.push(`操作者：${operator.name ? `${operator.name}(${eventData.operator_id})` : eventData.operator_id}`);
+      if (guild) msgLines.push(`群组：${guild.name ? `${guild.name}(${session.guildId})` : session.guildId}`);
+      if (eventData.comment) msgLines.push(`验证信息：${eventData.comment}`);
+
+      const sendFunc = targetType === 'private'
+        ? (m: string) => session.bot.sendPrivateMessage(targetId, m)
+        : (m: string) => session.bot.sendMessage(targetId, m);
+
+      await sendFunc(msgLines.join('\n'));
+      if (status === 'pending' && details.requestNumber) await sendFunc(`请回复以下命令处理请求 #${details.requestNumber}：\n通过[y/ya]${details.requestNumber} [备注] | 拒绝[n/na]${details.requestNumber} [理由]`);
+    } catch (error) {
+      this.logger.error(`发送请求 #${details.requestNumber || ''} 通知失败: ${error}`);
+    }
+  }
+
+  /**
    * 处理收到的请求
    */
   public async processRequest(session: Session, type: RequestType): Promise<void> {
@@ -84,11 +123,12 @@ export class OnebotRequest {
       const autoAcceptResult = await this.shouldAutoAccept(session, type);
       if (autoAcceptResult === true) {
         await this.processRequestAction(session, type, true);
+        await this.sendRequestNotification(session, type, 'approved');
       } else if (typeof autoAcceptResult === 'string') {
         await this.processRequestAction(session, type, false, autoAcceptResult);
-      }
-      else {
-        await this.setupNotification(session, type, requestKey);
+        await this.sendRequestNotification(session, type, 'rejected', { reason: autoAcceptResult });
+      } else {
+        await this.setupManualHandling(session, type, requestKey);
       }
     } catch (error) {
       this.logger.error(`处理请求 ${requestKey} 失败: ${error}`);
@@ -188,13 +228,16 @@ export class OnebotRequest {
   }
 
   /**
-   * 设置通知、响应监听和超时回退
+   * 设置手动处理流程：通知、响应监听和超时回退
    */
-  private async setupNotification(session: Session, type: RequestType, requestId: string): Promise<void> {
+  private async setupManualHandling(session: Session, type: RequestType, requestId: string): Promise<void> {
     const requestNumber = this.nextRequestNumber++;
     this.requestNumberMap.set(requestNumber, requestId);
     const activeRequest: ActiveRequest = { session, type, requestNumber };
     this.activeRequests.set(requestId, activeRequest);
+
+    await this.sendRequestNotification(session, type, 'pending', { requestNumber });
+
     const timeoutMin = typeof this.config.manualTimeout === 'number' ? this.config.manualTimeout : 60;
     if (timeoutMin > 0) {
       const timeoutAction = this.config.manualTimeoutAction || 'reject';
@@ -218,73 +261,50 @@ export class OnebotRequest {
       }, timeoutMin * 60 * 1000);
     }
 
-    try {
-      const { notifyTarget = '' } = this.config;
-      const [targetType, targetId] = notifyTarget.split(':');
-      if (!targetId || (targetType !== 'guild' && targetType !== 'private')) {
-        this.logger.warn(`通知目标错误: ${notifyTarget}`);
-        return;
-      }
-      const eventData = session.event?._data || {};
-      const user = await session.bot.getUser?.(session.userId)?.catch(() => null) ?? null;
-      const guild = type !== 'friend' ? await session.bot.getGuild?.(session.guildId)?.catch(() => null) ?? null : null;
-      const operator = type === 'guild' && eventData.operator_id && eventData.operator_id !== session.userId
-        ? await session.bot.getUser?.(eventData.operator_id.toString())?.catch(() => null) ?? null : null;
-      const msgLines = [];
-      if (user?.avatar) msgLines.push(`<image url="${user.avatar}"/>`);
-      msgLines.push(`类型：${type === 'friend' ? '好友申请' : type === 'member' ? '加群请求' : eventData.sub_type === 'invite' ? '群邀请' : '直接入群'}`);
-      if (session.userId && !(type === 'guild' && eventData.sub_type !== 'invite' && session.userId === session.selfId)) {
-        msgLines.push(`用户：${user?.name ? `${user.name}(${session.userId})` : session.userId}`);
-      }
-      if (operator) msgLines.push(`操作者：${operator.name ? `${operator.name}(${eventData.operator_id})` : eventData.operator_id}`);
-      if (guild) msgLines.push(`群组：${guild.name ? `${guild.name}(${session.guildId})` : session.guildId}`);
-      if (eventData.comment) msgLines.push(`验证信息：${eventData.comment}`);
-      const sendFunc = targetType === 'private'
+    const { notifyTarget = '' } = this.config;
+    const [targetType, targetId] = notifyTarget.split(':');
+    const sendFunc = targetType === 'private'
         ? (m) => session.bot.sendPrivateMessage(targetId, m)
         : (m) => session.bot.sendMessage(targetId, m);
-      await sendFunc(msgLines.join('\n'));
-      await sendFunc(`请回复以下命令处理请求 #${requestNumber}：\n通过[y/ya]${requestNumber} [备注] | 拒绝[n/na]${requestNumber} [理由]`);
-      activeRequest.disposer = this.ctx.middleware(async (s, next) => {
-        if (activeRequest.disposer && (targetType === 'private' ? s.userId !== targetId : s.guildId !== targetId)) return next();
-        const bulkMatch = s.content.trim().match(/^(ya|na|全部同意|全部拒绝)\s*(.*)$/);
-        if (bulkMatch && this.activeRequests.size > 0) {
-            const requestsToProcess = [...this.activeRequests.values()];
-            this.activeRequests.clear();
-            this.requestNumberMap.clear();
-            const isApprove = bulkMatch[1] === 'ya' || bulkMatch[1] === '全部同意';
-            const extraContent = bulkMatch[2]?.trim() || '';
-            let successCount = 0;
-            for (const req of requestsToProcess) {
-                req.disposer?.();
-                if (req.timeoutTimer) clearTimeout(req.timeoutTimer);
-                try {
-                    const reason = !isApprove ? extraContent : '';
-                    const remark = isApprove && req.type === 'friend' ? extraContent : '';
-                    await this.processRequestAction(req.session, req.type, isApprove, reason, remark);
-                    successCount++;
-                } catch (error) {
-                    this.logger.error(`处理请求 #${req.requestNumber} 失败: ${error}`);
-                }
-            }
-            if (successCount > 0) await sendFunc(`已${isApprove ? '通过' : '拒绝'} ${successCount} 个请求${extraContent ? `，理由/备注：${extraContent}` : ''}`);
-            return;
-        }
-        const match = s.content.trim().match(new RegExp(`^(y|n|通过|拒绝)(${requestNumber})\\s*(.*)$`));
-        if (!match) return next();
-        this.cleanupActiveRequest(requestId);
-        const isApprove = match[1] === 'y' || match[1] === '通过';
-        const extraContent = match[3]?.trim() || '';
-        try {
-          await this.processRequestAction(session, type, isApprove, !isApprove ? extraContent : '', isApprove && type === 'friend' ? extraContent : '');
-          await sendFunc(`请求 #${requestNumber} 已${isApprove ? '通过' : '拒绝'}${extraContent ? `，${isApprove ? '备注' : '原因'}：${extraContent}` : ''}`);
-        } catch (error) {
-          this.logger.error(`响应处理失败: ${error}`);
-          await sendFunc(`处理请求 #${requestNumber} 失败: ${error.message}`);
-        }
-      });
-    } catch (error) {
-      this.logger.error(`发送请求 #${requestNumber} 审核通知失败: ${error}`);
-    }
+
+    activeRequest.disposer = this.ctx.middleware(async (s, next) => {
+      if (activeRequest.disposer && (targetType === 'private' ? s.userId !== targetId : s.guildId !== targetId)) return next();
+      const bulkMatch = s.content.trim().match(/^(ya|na|全部同意|全部拒绝)\s*(.*)$/);
+      if (bulkMatch && this.activeRequests.size > 0) {
+          const requestsToProcess = [...this.activeRequests.values()];
+          this.activeRequests.clear();
+          this.requestNumberMap.clear();
+          const isApprove = bulkMatch[1] === 'ya' || bulkMatch[1] === '全部同意';
+          const extraContent = bulkMatch[2]?.trim() || '';
+          let successCount = 0;
+          for (const req of requestsToProcess) {
+              req.disposer?.();
+              if (req.timeoutTimer) clearTimeout(req.timeoutTimer);
+              try {
+                  const reason = !isApprove ? extraContent : '';
+                  const remark = isApprove && req.type === 'friend' ? extraContent : '';
+                  await this.processRequestAction(req.session, req.type, isApprove, reason, remark);
+                  successCount++;
+              } catch (error) {
+                  this.logger.error(`处理请求 #${req.requestNumber} 失败: ${error}`);
+              }
+          }
+          if (successCount > 0) await sendFunc(`已${isApprove ? '通过' : '拒绝'} ${successCount} 个请求${extraContent ? `，理由/备注：${extraContent}` : ''}`);
+          return;
+      }
+      const match = s.content.trim().match(new RegExp(`^(y|n|通过|拒绝)(${requestNumber})\\s*(.*)$`));
+      if (!match) return next();
+      this.cleanupActiveRequest(requestId);
+      const isApprove = match[1] === 'y' || match[1] === '通过';
+      const extraContent = match[3]?.trim() || '';
+      try {
+        await this.processRequestAction(session, type, isApprove, !isApprove ? extraContent : '', isApprove && type === 'friend' ? extraContent : '');
+        await sendFunc(`请求 #${requestNumber} 已${isApprove ? '通过' : '拒绝'}${extraContent ? `，${isApprove ? '备注' : '原因'}：${extraContent}` : ''}`);
+      } catch (error) {
+        this.logger.error(`响应处理失败: ${error}`);
+        await sendFunc(`处理请求 #${requestNumber} 失败: ${error.message}`);
+      }
+    });
   }
 
   /**
