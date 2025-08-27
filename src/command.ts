@@ -41,19 +41,10 @@ function getGroupId(options: any, session: any): number {
 /**
  * 获取目标成员ID
  */
-async function getTargetId(target: any, session: any, utils: any, groupId: number, roleCheck = false): Promise<string> {
-  // 无目标时返回自身ID
+function getTargetId(target: any, session: any, utils: any): string {
   if (!target) return session.userId;
   const parsed = utils.parseTarget(target);
-  if (!parsed) return '无效成员';
-  // 不需要权限检查或检查通过时返回目标ID
-  if (!roleCheck) return parsed;
-  try {
-    const info = await session.onebot.getGroupMemberInfo(groupId, Number(session.userId), true);
-    return info?.role !== 'member' ? parsed : session.userId;
-  } catch {
-    return '获取成员信息失败';
-  }
+  return parsed;
 }
 
 /**
@@ -95,14 +86,27 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
   qgroup.subcommand('tag [title:string] [target]', '设置专属头衔')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置或清除指定成员的群头衔\n使用引号添加不连续的内容，最多18字符\n英文(标点)和数字1字符，中文和其他符号3字符，Emoji6字符')
-    .action(createGroupCommand(utils, logger, ['owner'], [], commandWhitelist,
-      async (session, options, groupId, title = '', target) => {
+    .action(async ({ session, options }, title = '', target) => {
+      try {
+        const groupId = getGroupId(options, session);
         if (title && getTitleLen(title) > 18) return '设置头衔失败: 长度超过18字符';
-        const targetId = await getTargetId(target, session, utils, groupId, !!target);
-        await session.onebot.setGroupSpecialTitle(groupId, Number(targetId), title);
-        return `已${title ? '将' : '清除'}${targetId === session.userId ? '您' : `用户 ${targetId}`} 的头衔${title ? `设置为：${title}` : ''}`;
+
+        const targetId = getTargetId(target, session, utils);
+        if (targetId === '无效成员') return targetId;
+
+        const requiredBotRoles = ['owner'];
+        const requiredUserRoles = target && targetId !== session.userId ? ['owner', 'admin'] : [];
+
+        const actionFn = async () => {
+          await session.onebot.setGroupSpecialTitle(groupId, Number(targetId), title);
+          return `已${title ? '将' : '清除'}${targetId === session.userId ? '您' : `用户 ${targetId}`} 的头衔${title ? `设置为：${title}` : ''}`;
+        };
+
+        return utils.withRoleCheck(session, groupId, logger, requiredBotRoles, requiredUserRoles, commandWhitelist, actionFn)();
+      } catch (error) {
+        return utils.handleError(session, error);
       }
-    ));
+    });
 
   // 设置群名片
   qgroup.subcommand('membercard [card:string] [target]', '设置群名片')
@@ -111,8 +115,8 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
     .action(async ({ session, options }, card = '', target) => {
       try {
         const groupId = getGroupId(options, session);
-        const targetId = await getTargetId(target, session, utils, groupId, false);
-        if (targetId === '无效成员' || targetId === '获取成员信息失败') return targetId;
+        const targetId = getTargetId(target, session, utils);
+        if (targetId === '无效成员') return targetId;
 
         const isTargetingSelf = targetId === session.userId;
         const isTargetingBot = targetId === session.selfId;
@@ -126,11 +130,8 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
         const requiredBotRoles = isTargetingBot ? [] : ['owner', 'admin'];
 
         const actionFn = async () => {
-          const finalTargetId = await getTargetId(target, session, utils, groupId, !!target);
-          if (finalTargetId === '无效成员' || finalTargetId === '获取成员信息失败') return finalTargetId;
-
-          await session.onebot.setGroupCard(groupId, Number(finalTargetId), card);
-          return `已${card ? '将' : '清除'}用户 ${finalTargetId} 的群名片${card ? `设置为：${card}` : ''}`;
+          await session.onebot.setGroupCard(groupId, Number(targetId), card);
+          return `已${card ? '将' : '清除'}用户 ${targetId} 的群名片${card ? `设置为：${card}` : ''}`;
         };
 
         return utils.withRoleCheck(session, groupId, logger, requiredBotRoles, requiredUserRoles, commandWhitelist, actionFn)();
