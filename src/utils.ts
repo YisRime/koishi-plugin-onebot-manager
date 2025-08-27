@@ -35,14 +35,14 @@ export const utils = {
   },
 
   /**
-   * 检查机器人和用户在群内的权限角色
+   * 检查机器人和用户在指定群内的权限角色
    */
-  async checkPermission(session: Session, logger?: Logger) {
-    if (!session.guildId) return { bot: null, user: null };
+  async checkPermission(session: Session, groupId: number, logger?: Logger) {
+    if (!groupId) return { bot: null, user: null };
     try {
       const [bot, user] = await Promise.all([
-        session.onebot.getGroupMemberInfo(+session.guildId, +session.selfId, true),
-        session.onebot.getGroupMemberInfo(+session.guildId, +session.userId, true)
+        session.onebot.getGroupMemberInfo(groupId, +session.selfId, true),
+        session.onebot.getGroupMemberInfo(groupId, +session.userId, true)
       ]);
       return { bot: bot?.role ?? null, user: user?.role ?? null };
     } catch (e) {
@@ -54,10 +54,10 @@ export const utils = {
   /**
    * 包装函数，执行前检查机器人和用户的群权限
    */
-  withRoleCheck<T extends any[], R>(session: Session, logger: Logger, requiredBotRoles: string[] = [],
+  withRoleCheck<T extends any[], R>(session: Session, groupId: number, logger: Logger, requiredBotRoles: string[] = [],
     requiredUserRoles: string[] = [], commandWhitelist: string[] = [], fn: (...args: T) => Promise<R>) {
     return (...args: T): Promise<R | null> =>
-      utils.checkPermission(session, logger).then(({ bot, user }) => {
+      utils.checkPermission(session, groupId, logger).then(({ bot, user }) => {
         // 检查权限并构建错误列表
         const errors = [];
         // 检查机器人权限

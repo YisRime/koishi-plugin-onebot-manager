@@ -34,7 +34,7 @@ function getTitleLen(title: string) {
  */
 function getGroupId(options: any, session: any): number {
   const groupId = options.group ? Number(options.group) : Number(session.guildId);
-  if (isNaN(groupId) || groupId <= 0) throw new Error('无效群号');
+  if (isNaN(groupId) || groupId <= 0) throw new Error('无效或未指定群号');
   return groupId;
 }
 
@@ -57,30 +57,28 @@ async function getTargetId(target: any, session: any, utils: any, groupId: numbe
 }
 
 /**
- * 创建标准命令处理函数
+ * 群组命令处理
  */
-function createCommandAction(utils: any, logger: Logger, botRoles: string[], userRoles: string[], commandWhitelist: string[],
-    actionFn: (session: any, options: any, ...args: any[]) => Promise<any>) {
-  return ({ session, options }, ...args) =>
-    utils.withRoleCheck(session, logger, botRoles, userRoles, commandWhitelist,
-      () => {
-        try {
-          return actionFn(session, options, ...args);
-        } catch (error) {
-          return utils.handleError(session, error);
-        }
-      }
-    )();
+function createGroupCommand(utils: any, logger: Logger, botRoles: string[], userRoles: string[], commandWhitelist: string[],
+    actionFn: (session: any, options: any, groupId: number, ...args: any[]) => Promise<any>) {
+  return ({ session, options }, ...args) => {
+    try {
+      const groupId = getGroupId(options, session);
+      const action = () => actionFn(session, options, groupId, ...args);
+      return utils.withRoleCheck(session, groupId, logger, botRoles, userRoles, commandWhitelist, action)();
+    } catch (error) {
+      return utils.handleError(session, error);
+    }
+  };
 }
 
 /**
  * 群管理设置/取消操作
  */
 function adminAction(set: boolean, utils: any, logger: Logger, commandWhitelist: string[]) {
-  return createCommandAction(utils, logger, ['owner'], ['owner', 'admin'], commandWhitelist,
-    async (session, options, target) => {
+  return createGroupCommand(utils, logger, ['owner'], ['owner', 'admin'], commandWhitelist,
+    async (session, groupId, target) => {
       if (!target) return '请指定成员';
-      const groupId = getGroupId(options, session);
       const targetId = utils.parseTarget(target);
       if (!targetId) return '无效的成员ID';
       await session.onebot.setGroupAdmin(groupId, Number(targetId), set);
@@ -97,13 +95,12 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
   qgroup.subcommand('tag [title:string] [target]', '设置专属头衔')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置或清除指定成员的群头衔\n使用引号添加不连续的内容，最多18字符\n英文(标点)和数字1字符，中文和其他符号3字符，Emoji6字符')
-    .action(createCommandAction(utils, logger, ['owner'], [], commandWhitelist,
-      async (session, options, title = '', target) => {
+    .action(createGroupCommand(utils, logger, ['owner'], [], commandWhitelist,
+      async (session, options, groupId, title = '', target) => {
         if (title && getTitleLen(title) > 18) return '设置头衔失败: 长度超过18字符';
-        const groupId = getGroupId(options, session);
         const targetId = await getTargetId(target, session, utils, groupId, !!target);
         await session.onebot.setGroupSpecialTitle(groupId, Number(targetId), title);
-        return `已${title ? '将' : '清除'}${targetId === session.userId ? '您' : `用户 ${targetId}`}的头衔${title ? `设置为：${title}` : ''}`;
+        return `已${title ? '将' : '清除'}${targetId === session.userId ? '您' : `用户 ${targetId}`} 的头衔${title ? `设置为：${title}` : ''}`;
       }
     ));
 
@@ -111,53 +108,73 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
   qgroup.subcommand('membercard [card:string] [target]', '设置群名片')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置或清除指定成员的群名片')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
-      async (session, options, card = '', target) => {
+    .action(async ({ session, options }, card = '', target) => {
+      try {
         const groupId = getGroupId(options, session);
-        const targetId = await getTargetId(target, session, utils, groupId, !!target);
-        await session.onebot.setGroupCard(groupId, Number(targetId), card);
-        return `已${card ? '将' : '清除'}${targetId === session.userId ? '您' : `用户 ${targetId}`}的群名片${card ? `设置为：${card}` : ''}`;
+        const targetId = await getTargetId(target, session, utils, groupId, false);
+        if (targetId === '无效成员' || targetId === '获取成员信息失败') return targetId;
+
+        const isTargetingSelf = targetId === session.userId;
+        const isTargetingBot = targetId === session.selfId;
+
+        if (isTargetingSelf) {
+          await session.onebot.setGroupCard(groupId, Number(targetId), card);
+          return `已${card ? '将' : '清除'}您的群名片${card ? `设置为：${card}` : ''}`;
+        }
+
+        const requiredUserRoles = ['owner', 'admin'];
+        const requiredBotRoles = isTargetingBot ? [] : ['owner', 'admin'];
+
+        const actionFn = async () => {
+          const finalTargetId = await getTargetId(target, session, utils, groupId, !!target);
+          if (finalTargetId === '无效成员' || finalTargetId === '获取成员信息失败') return finalTargetId;
+
+          await session.onebot.setGroupCard(groupId, Number(finalTargetId), card);
+          return `已${card ? '将' : '清除'}用户 ${finalTargetId} 的群名片${card ? `设置为：${card}` : ''}`;
+        };
+
+        return utils.withRoleCheck(session, groupId, logger, requiredBotRoles, requiredUserRoles, commandWhitelist, actionFn)();
+      } catch (error) {
+        return utils.handleError(session, error);
       }
-    ));
+    });
 
   // 设置群名
   qgroup.subcommand('groupname <group_name:string>', '设置群名称')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置当前群的名称')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
-      async (session, options, group_name) => {
+    .action(createGroupCommand(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
+      async (session, groupId, group_name) => {
         if (!group_name) return '请输入群名';
-        const groupId = getGroupId(options, session);
         await session.onebot.setGroupName(groupId, group_name);
         return `已将群名设置为：${group_name}`;
       }
     ));
 
+  // 设置/移除精华消息
+  const essenceAction = (del = false) => createGroupCommand(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
+    async (session, messageId) => {
+      messageId = messageId || session.quote?.id;
+      if (!messageId) return '请提供消息ID或引用消息';
+      if (del) {
+        await session.onebot.deleteEssenceMsg(messageId);
+        return '已移除精华消息';
+      }
+      await session.onebot.setEssenceMsg(messageId);
+      return '已设置精华消息';
+    });
+
   // 设置精华消息
   const essence = qgroup.subcommand('essence [messageId:string]', '设置精华消息')
     .option('group', '-g, --group <groupId> 指定群号')
-    .usage('设置指定消息为精华消息')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
-      async (session, messageId) => {
-        messageId = messageId || session.quote?.id;
-        if (!messageId) return '请提供消息ID或引用消息';
-        await session.onebot.setEssenceMsg(messageId);
-        return '已设置精华消息';
-      }
-    ));
+    .usage('在指定群设置精华消息 (权限检查将在目标群进行)')
+    .action(essenceAction(false));
 
   // 移除精华消息
   essence.subcommand('.del [messageId:string]', '移除精华消息')
     .option('group', '-g, --group <groupId> 指定群号')
-    .usage('移除指定消息的精华消息')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
-      async (session, messageId) => {
-        messageId = messageId || session.quote?.id;
-        if (!messageId) return '请提供消息ID或引用消息';
-        await session.onebot.deleteEssenceMsg(messageId);
-        return '已移除精华消息';
-      }
-    ));
+    .usage('在指定群移除精华消息 (权限检查将在目标群进行)')
+    .action(essenceAction(true));
 
   // 设置群管理
   const admin = qgroup.subcommand('admin <target>', '设置群管理')
@@ -176,9 +193,8 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
     .option('cancel', '-c, --cancel 取消禁言')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('禁言指定成员，默认 30 分钟，最长 30 天')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
-      async (session, options, target, duration) => {
-        const groupId = getGroupId(options, session);
+    .action(createGroupCommand(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
+      async (session, options, groupId, target, duration) => {
         const targetId = utils.parseTarget(target);
         if (!targetId) return '请指定有效成员';
         const banDuration = options.cancel ? 0 : (duration ? Number(duration) : 1800);
@@ -194,10 +210,9 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
   mute.subcommand('.all [enable:boolean]', '全体禁言')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('开启或关闭全体禁言')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
-      async (session, options, enable) => {
+    .action(createGroupCommand(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
+      async (session, groupId, enable) => {
         const val = typeof enable === 'boolean' ? enable : true;
-        const groupId = getGroupId(options, session);
         await session.onebot.setGroupWholeBan(groupId, val);
         return val ? '已开启全体禁言' : '已关闭全体禁言';
       }
@@ -208,11 +223,10 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
     .option('reject', '-r, --reject 拒绝再次加群')
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('逐出指定成员，使用 -r 拒绝此人再次加群')
-    .action(createCommandAction(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
-      async (session, options, target) => {
+    .action(createGroupCommand(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
+      async (session, options, groupId, target) => {
         const targetId = utils.parseTarget(target);
         if (!targetId) return '请指定有效的成员';
-        const groupId = getGroupId(options, session);
         await session.onebot.setGroupKick(groupId, Number(targetId), !!options.reject);
         return `已将成员 ${targetId} 逐出群${options.reject ? '，并拒绝其再次加群' : ''}`;
       }
@@ -220,20 +234,26 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
 
   // 撤回消息
   qgroup.subcommand('revoke', '撤回消息')
-    .option('group', '-g, --group <groupId> 指定群号')
-    .usage('撤回指定回复消息。')
+    .usage('撤回指定回复消息。仅能在消息所在群使用。')
     .action(async ({ session }) => {
       const quote = session.quote;
       if (!quote?.id) return '请回复需要撤回的消息';
 
       try {
-        const { user: userRole } = await utils.checkPermission(session, logger);
+        const groupId = Number(session.guildId);
+        if (!groupId) return;
+
+        const { user: userRole } = await utils.checkPermission(session, groupId, logger);
         const quotedSenderId = quote.user?.id;
 
         const isManager = userRole === 'owner' || userRole === 'admin';
         const isBotMessage = quotedSenderId && String(quotedSenderId) === session.selfId;
 
-        if (isManager || isBotMessage) await session.onebot.deleteMsg(quote.id);
+        if (isManager || isBotMessage) {
+          await session.onebot.deleteMsg(quote.id);
+        } else {
+          return utils.handleError(session, '仅管理员可撤回他人消息');
+        }
       } catch (error) {
         return utils.handleError(session, error);
       }
