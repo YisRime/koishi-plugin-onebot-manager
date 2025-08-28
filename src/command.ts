@@ -68,7 +68,7 @@ function createGroupCommand(utils: any, logger: Logger, botRoles: string[], user
  */
 function adminAction(set: boolean, utils: any, logger: Logger, commandWhitelist: string[]) {
   return createGroupCommand(utils, logger, ['owner'], ['owner', 'admin'], commandWhitelist,
-    async (session, groupId, target) => {
+    async (session, options, groupId, target) => {
       if (!target) return '请指定成员';
       const targetId = utils.parseTarget(target);
       if (!targetId) return '无效的成员ID';
@@ -145,7 +145,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('设置当前群的名称')
     .action(createGroupCommand(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
-      async (session, groupId, group_name) => {
+      async (session, options, groupId, group_name) => {
         if (!group_name) return '请输入群名';
         await session.onebot.setGroupName(groupId, group_name);
         return `已将群名设置为：${group_name}`;
@@ -154,7 +154,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
 
   // 设置/移除精华消息
   const essenceAction = (del = false) => createGroupCommand(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
-    async (session, messageId) => {
+    async (session, options, groupId, messageId) => {
       messageId = messageId || session.quote?.id;
       if (!messageId) return '请提供消息ID或引用消息';
       if (del) {
@@ -212,7 +212,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
     .option('group', '-g, --group <groupId> 指定群号')
     .usage('开启或关闭全体禁言')
     .action(createGroupCommand(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
-      async (session, groupId, enable) => {
+      async (session, options, groupId, enable) => {
         const val = typeof enable === 'boolean' ? enable : true;
         await session.onebot.setGroupWholeBan(groupId, val);
         return val ? '已开启全体禁言' : '已关闭全体禁言';
