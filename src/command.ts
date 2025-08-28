@@ -155,13 +155,13 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
   // 设置/移除精华消息
   const essenceAction = (del = false) => createGroupCommand(utils, logger, ['owner', 'admin'], ['owner', 'admin'], commandWhitelist,
     async (session, options, groupId, messageId) => {
-      messageId = messageId || session.quote?.id;
-      if (!messageId) return '请提供消息ID或引用消息';
+      const targetMessageId = session.quote?.id || messageId;
+      if (!targetMessageId) return '请提供消息ID或引用消息';
       if (del) {
-        await session.onebot.deleteEssenceMsg(messageId);
+        await session.onebot.deleteEssenceMsg(targetMessageId);
         return '已移除精华消息';
       }
-      await session.onebot.setEssenceMsg(messageId);
+      await session.onebot.setEssenceMsg(targetMessageId);
       return '已设置精华消息';
     });
 
