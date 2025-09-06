@@ -146,20 +146,21 @@ export class OnebotRequest {
       if (!rule) return false;
       if (rule.keyword) {
         try {
-          if (new RegExp(rule.keyword).test(validationMessage)) return true;
+          if (!new RegExp(rule.keyword).test(validationMessage)) return false;
         } catch (e) {
           this.logger.warn(`群 ${rule.guildId} 正则无效: ${rule.keyword}`);
+          return false;
         }
       }
       if (rule.minLevel >= 0) {
         try {
           const userInfo = await session.onebot.getStrangerInfo(Number(session.userId), false) as OneBotUserInfo;
           if ((userInfo.level || 0) < rule.minLevel) return `QQ 等级低于${rule.minLevel}级`;
-          return true;
         } catch (error) {
           return `获取用户信息失败: ${error}`;
         }
       }
+      return true;
     }
     if (type === 'friend') {
       const { FriendRequestAutoRegex, FriendLevel = -1 } = this.config;
