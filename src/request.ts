@@ -109,7 +109,7 @@ export class OnebotRequest {
       await sendFunc(msgLines.join('\n'));
       if (status === 'pending' && details.requestNumber) await sendFunc(`请回复以下命令处理请求 #${details.requestNumber}：\n通过[y/ya]${details.requestNumber} [备注] | 拒绝[n/na]${details.requestNumber} [理由]`);
     } catch (error) {
-      this.logger.error(`发送请求 #${details.requestNumber || ''} 通知失败: ${error}`);
+      this.logger.error(`发送请求 #${details.requestNumber} 通知失败: ${error}`);
     }
   }
 
@@ -139,7 +139,7 @@ export class OnebotRequest {
    * 判断是否应自动接受请求
    */
   private async shouldAutoAccept(session: Session, type: RequestType): Promise<boolean | string> {
-    const validationMessage = session.event?._data?.comment || '';
+    const validationMessage = session.event?._data?.comment;
     if (type === 'member') {
       const { MemberRequestAutoRules = [] } = this.config;
       const rule = MemberRequestAutoRules.find(r => r.guildId === session.guildId);
@@ -154,8 +154,8 @@ export class OnebotRequest {
       }
       if (rule.minLevel >= 0) {
         try {
-          const userInfo = await session.onebot.getStrangerInfo(Number(session.userId), false) as OneBotUserInfo;
-          if ((userInfo.level || 0) < rule.minLevel) return `QQ 等级低于${rule.minLevel}级`;
+          const userInfo = await session.onebot.getStrangerInfo(session.userId, false) as OneBotUserInfo;
+          if (userInfo.level < rule.minLevel) return `QQ 等级低于${rule.minLevel}级`;
         } catch (error) {
           return `获取用户信息失败: ${error}`;
         }
@@ -173,8 +173,8 @@ export class OnebotRequest {
       }
       if (FriendLevel < 0) return false;
       try {
-        const userInfo = await session.onebot.getStrangerInfo(Number(session.userId), false) as OneBotUserInfo;
-        if ((userInfo.level || 0) < FriendLevel) return `QQ 等级低于${FriendLevel}级`;
+        const userInfo = await session.onebot.getStrangerInfo(session.userId, false) as OneBotUserInfo;
+        if (userInfo.level < FriendLevel) return `QQ 等级低于${FriendLevel}级`;
         return true;
       } catch (error) {
         return `获取用户信息失败: ${error}`;
@@ -188,7 +188,7 @@ export class OnebotRequest {
       if (user?.authority > 1) return true;
       if (GuildMinMemberCount >= 0 || GuildMaxCapacity >= 0) {
         try {
-          const info = await session.onebot.getGroupInfo(Number(session.guildId), true) as OneBotGroupInfo;
+          const info = await session.onebot.getGroupInfo(session.guildId, true) as OneBotGroupInfo;
           if (GuildMinMemberCount >= 0 && info.member_count < GuildMinMemberCount) return `群成员数量不足${GuildMinMemberCount}人`;
           if (GuildMaxCapacity >= 0 && info.max_member_count < GuildMaxCapacity) return `群最大容量不足${GuildMaxCapacity}人`;
           return true;
@@ -214,7 +214,7 @@ export class OnebotRequest {
             this.logger.warn(`发送退群通知失败: ${error}`);
           }
         }
-        try { await session.onebot.setGroupLeave(Number(session.guildId), false); return true; }
+        try { await session.onebot.setGroupLeave(session.guildId, false); return true; }
         catch (error) { this.logger.error(`退出群组 ${session.guildId} 失败: ${error}`); return false; }
       }
       const flag = eventData.flag;
@@ -241,7 +241,7 @@ export class OnebotRequest {
 
     const timeoutMin = typeof this.config.manualTimeout === 'number' ? this.config.manualTimeout : 60;
     if (timeoutMin > 0) {
-      const timeoutAction = this.config.manualTimeoutAction || 'reject';
+      const timeoutAction = this.config.manualTimeoutAction;
       activeRequest.timeoutTimer = setTimeout(async () => {
         const currentRequest = this.activeRequests.get(requestId);
         if (!currentRequest) return;
@@ -316,7 +316,7 @@ export class OnebotRequest {
       const handleRequest = (type: RequestType) => async (session: Session) => {
         const data = session.event?._data || {};
         session.userId = data.user_id?.toString();
-        if (type !== 'friend') session.guildId = data.group_id?.toString() || '';
+        if (type !== 'friend') session.guildId = data.group_id?.toString();
         await this.processRequest(session, type);
       };
       this.ctx.on('friend-request', handleRequest('friend'));
