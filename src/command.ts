@@ -235,7 +235,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
 
   // 撤回消息
   qgroup.subcommand('revoke', '撤回消息')
-    .usage('撤回指定回复消息。仅能在消息所在群使用。')
+    .usage('回复指定消息来撤回对应内容。')
     .action(async ({ session }) => {
       const quote = session.quote;
       if (!quote?.id) return '请回复需要撤回的消息';
@@ -245,7 +245,10 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
         if (!groupId) return;
 
         const isWhitelisted = commandWhitelist.includes(session.userId);
-        if (isWhitelisted) await session.onebot.deleteMsg(quote.id);
+        if (isWhitelisted) {
+          await session.onebot.deleteMsg(quote.id);
+          return;
+        }
 
         const { user: userRole } = await utils.checkPermission(session, groupId, logger);
         const quotedSenderId = quote.user?.id;
