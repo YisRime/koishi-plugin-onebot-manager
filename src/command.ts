@@ -244,6 +244,9 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
         const groupId = Number(session.guildId);
         if (!groupId) return;
 
+        const isWhitelisted = commandWhitelist.includes(session.userId);
+        if (isWhitelisted) await session.onebot.deleteMsg(quote.id);
+
         const { user: userRole } = await utils.checkPermission(session, groupId, logger);
         const quotedSenderId = quote.user?.id;
 
