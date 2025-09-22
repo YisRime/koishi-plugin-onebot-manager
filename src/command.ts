@@ -239,24 +239,14 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
     .action(async ({ session }) => {
       const quote = session.quote;
       if (!quote?.id) return '请回复需要撤回的消息';
-
       try {
-        const groupId = Number(session.guildId);
-        if (!groupId) return;
-
         const isWhitelisted = commandWhitelist.includes(session.userId);
         if (isWhitelisted) {
           await session.onebot.deleteMsg(quote.id);
           return;
         }
-
-        const { user: userRole } = await utils.checkPermission(session, groupId, logger);
-        const quotedSenderId = quote.user?.id;
-
-        const isManager = userRole === 'owner' || userRole === 'admin';
-        const isBotMessage = quotedSenderId && String(quotedSenderId) === session.selfId;
-
-        if (isManager || isBotMessage) {
+        const { user: userRole } = await utils.checkPermission(session, session.guildId, logger);
+        if (userRole !== 'member' || quote.user?.id === session.userId || quote.user?.id === session.selfId) {
           await session.onebot.deleteMsg(quote.id);
         } else {
           return utils.handleError(session, '仅管理员可撤回他人消息');
