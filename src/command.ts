@@ -252,7 +252,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
           return utils.handleError(session, '仅管理员可撤回他人消息');
         }
       } catch (error) {
-        return utils.handleError(session, error);
+        logger.warn(`撤回消息 ${quote.id} 失败:`, error);
       }
     });
 }
