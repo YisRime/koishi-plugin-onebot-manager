@@ -69,10 +69,10 @@ export const Config: Schema<Config> = Schema.intersect([
       keyword: Schema.string().description('正则'),
       minLevel: Schema.number().description('等级').default(-1),
     })).description('加群验证规则').role('table'),
-    GuildAllowUsers: Schema.array(String).description('额外邀请加群白名单').role('table'),
+    GuildAllowUsers: Schema.array(String).description('邀请加群白名单').role('table'),
   }).description('请求配置'),
   Schema.object({
-    commandWhitelist: Schema.array(String).description('额外命令使用白名单').role('table'),
+    commandWhitelist: Schema.array(String).description('命令使用白名单').role('table'),
   }).description('命令配置'),
 ])
 
