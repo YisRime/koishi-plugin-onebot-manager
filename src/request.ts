@@ -315,7 +315,13 @@ export class OnebotRequest {
     if (this.config.enable) {
       const handleRequest = (type: RequestType) => async (session: Session) => {
         const data = session.event?._data || {};
-        session.userId = data.user_id?.toString();
+
+        if (type === 'guild' && data.sub_type === 'invite' && data.operator_id) {
+          session.userId = data.operator_id.toString();
+        } else {
+          session.userId = data.user_id?.toString();
+        }
+
         if (type !== 'friend') session.guildId = data.group_id?.toString();
         await this.processRequest(session, type);
       };
