@@ -80,32 +80,42 @@ export class OnebotRequest {
   private async sendRequestNotification(session: Session, type: RequestType, status: 'pending' | 'approved' | 'rejected', details: { requestNumber?: number; reason?: string } = {}): Promise<void> {
     const { notifyTarget = '' } = this.config;
     if (!notifyTarget) return;
-
     const [targetType, targetId] = notifyTarget.split(':');
     if (!targetId || (targetType !== 'guild' && targetType !== 'private')) {
       this.logger.warn(`通知目标错误: ${notifyTarget}`);
       return;
     }
-
     try {
       const eventData = session.event?._data || {};
       const user = await session.bot.getUser?.(session.userId)?.catch(() => null) ?? { name: session.userId };
       const guild = type !== 'friend' ? await session.bot.getGuild?.(session.guildId)?.catch(() => null) ?? null : null;
-      const operator = type === 'guild' && eventData.operator_id && eventData.operator_id !== session.userId
+      const operator = eventData.operator_id && eventData.operator_id !== session.userId
         ? await session.bot.getUser?.(eventData.operator_id.toString())?.catch(() => null) ?? null : null;
-
       const msgLines = [];
       if (user?.avatar) msgLines.push(`<image url="${user.avatar}"/>`);
-      msgLines.push(`类型：${type === 'friend' ? '好友申请' : type === 'member' ? '加群请求' : eventData.sub_type === 'invite' ? '群邀请' : '直接入群'}`);
-      if (session.userId && !(type === 'guild' && eventData.sub_type !== 'invite' && session.userId === session.selfId)) msgLines.push(`用户：${user?.name ? `${user.name}(${session.userId})` : session.userId}`);
-      if (operator) msgLines.push(`操作者：${operator.name ? `${operator.name}(${eventData.operator_id})` : eventData.operator_id}`);
+      let requestTypeText = '';
+      const userLabel = '用户';
+      let showUserLine = true;
+      switch (type) {
+        case 'friend':
+          requestTypeText = '好友申请';
+          break;
+        case 'member':
+          requestTypeText = '加群请求';
+          break;
+        case 'guild':
+          requestTypeText = '群组邀请';
+          if (session.userId === session.selfId) showUserLine = false;
+          break;
+      }
+      msgLines.push(`类型：${requestTypeText}`);
+      if (showUserLine) msgLines.push(`${userLabel}：${user?.name ? `${user.name}(${session.userId})` : session.userId}`);
+      if (operator) msgLines.push(`管理：${operator.name ? `${operator.name}(${eventData.operator_id})` : eventData.operator_id}`);
       if (guild) msgLines.push(`群组：${guild.name ? `${guild.name}(${session.guildId})` : session.guildId}`);
       if (eventData.comment) msgLines.push(`验证信息：${eventData.comment}`);
-
       const sendFunc = targetType === 'private'
         ? (m: string) => session.bot.sendPrivateMessage(targetId, m)
         : (m: string) => session.bot.sendMessage(targetId, m);
-
       await sendFunc(msgLines.join('\n'));
       if (status === 'pending' && details.requestNumber) await sendFunc(`请回复以下命令处理请求 #${details.requestNumber}：\n通过[y/ya]${details.requestNumber} [备注] | 拒绝[n/na]${details.requestNumber} [理由]`);
     } catch (error) {
@@ -140,64 +150,66 @@ export class OnebotRequest {
    */
   private async shouldAutoAccept(session: Session, type: RequestType): Promise<boolean | string> {
     const validationMessage = session.event?._data?.comment;
-    if (type === 'member') {
-      const { MemberRequestAutoRules = [] } = this.config;
-      const rule = MemberRequestAutoRules.find(r => r.guildId === session.guildId);
-      if (!rule) return false;
-      if (rule.keyword) {
+    switch (type) {
+      case 'member': {
+        const { MemberRequestAutoRules = [] } = this.config;
+        const rule = MemberRequestAutoRules.find(r => r.guildId === session.guildId);
+        if (!rule) return false;
+        const hasKeywordRule = !!rule.keyword;
+        const hasLevelRule = (rule.minLevel ?? -1) >= 0;
+        if (!hasKeywordRule && !hasLevelRule) return false;
+        if (hasKeywordRule) {
+          try {
+            if (!new RegExp(rule.keyword).test(validationMessage)) return false;
+          } catch (e) {
+            return false;
+          }
+        }
+        if (hasLevelRule) {
+          try {
+            const userInfo = await session.onebot.getStrangerInfo(session.userId, false) as OneBotUserInfo;
+            if (userInfo.level < rule.minLevel) return `QQ 等级低于${rule.minLevel}级`;
+          } catch (error) {
+            return false;
+          }
+        }
+        return true;
+      }
+      case 'friend': {
+        const { FriendRequestAutoRegex, FriendLevel = -1 } = this.config;
+        if (FriendRequestAutoRegex) {
+          try {
+            if (new RegExp(FriendRequestAutoRegex).test(validationMessage)) return true;
+          } catch (e) {
+            this.logger.warn(`好友申请正则无效: ${FriendRequestAutoRegex}`);
+          }
+        }
+        if (FriendLevel < 0) return false;
         try {
-          if (!new RegExp(rule.keyword).test(validationMessage)) return false;
-        } catch (e) {
-          this.logger.warn(`群 ${rule.guildId} 正则无效: ${rule.keyword}`);
+          const userInfo = await session.onebot.getStrangerInfo(session.userId, false) as OneBotUserInfo;
+          return userInfo.level >= FriendLevel ? true : `QQ 等级低于${FriendLevel}级`;
+        } catch (error) {
           return false;
         }
       }
-      if (rule.minLevel >= 0) {
+      case 'guild': {
+        const { GuildAllowUsers = [], GuildMinMemberCount = -1, GuildMaxCapacity = -1 } = this.config;
+        if (GuildAllowUsers.includes(session.userId)) return true;
         try {
-          const userInfo = await session.onebot.getStrangerInfo(session.userId, false) as OneBotUserInfo;
-          if (userInfo.level < rule.minLevel) return `QQ 等级低于${rule.minLevel}级`;
-        } catch (error) {
-          return `获取用户信息失败: ${error}`;
-        }
-      }
-      return true;
-    }
-    if (type === 'friend') {
-      const { FriendRequestAutoRegex, FriendLevel = -1 } = this.config;
-      if (FriendRequestAutoRegex) {
-        try {
-          if (new RegExp(FriendRequestAutoRegex).test(validationMessage)) return true;
-        } catch (e) {
-          this.logger.warn(`好友申请正则无效: ${FriendRequestAutoRegex}`);
-        }
-      }
-      if (FriendLevel < 0) return false;
-      try {
-        const userInfo = await session.onebot.getStrangerInfo(session.userId, false) as OneBotUserInfo;
-        if (userInfo.level < FriendLevel) return `QQ 等级低于${FriendLevel}级`;
-        return true;
-      } catch (error) {
-        return `获取用户信息失败: ${error}`;
-      }
-    }
-    if (type === 'guild') {
-      const { GuildAllowUsers = [], GuildMinMemberCount = -1, GuildMaxCapacity = -1 } = this.config;
-      if (GuildAllowUsers.includes(session.userId)) return true;
-      let user;
-      try { user = await this.ctx.database.getUser(session.platform, session.userId); } catch {}
-      if (user?.authority > 1) return true;
-      if (GuildMinMemberCount >= 0 || GuildMaxCapacity >= 0) {
+          const user = await this.ctx.database.getUser(session.platform, session.userId);
+          if (user?.authority > 1) return true;
+        } catch {}
+        if (GuildMinMemberCount < 0 && GuildMaxCapacity < 0) return false;
         try {
           const info = await session.onebot.getGroupInfo(session.guildId, true) as OneBotGroupInfo;
           if (GuildMinMemberCount >= 0 && info.member_count < GuildMinMemberCount) return `群成员数量不足${GuildMinMemberCount}人`;
           if (GuildMaxCapacity >= 0 && info.max_member_count < GuildMaxCapacity) return `群最大容量不足${GuildMaxCapacity}人`;
           return true;
         } catch (error) {
-          return `获取群信息失败: ${error}`;
+          return false;
         }
       }
     }
-    return false;
   }
 
   /**
