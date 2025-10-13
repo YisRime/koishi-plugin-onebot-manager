@@ -40,6 +40,7 @@ export interface Config {
   GuildMaxCapacity?: number
   manualTimeout?: number
   manualTimeoutAction?: 'accept' | 'reject'
+  enableDebug?: boolean
 }
 
 export const Config: Schema<Config> = Schema.intersect([
@@ -55,6 +56,7 @@ export const Config: Schema<Config> = Schema.intersect([
   }).description('监听配置'),
   Schema.object({
     enable: Schema.boolean().description('开启请求监听').default(true),
+    enableDebug: Schema.boolean().description('开启调试日志').default(false),
     manualTimeout: Schema.number().description('请求超时时长').default(360).min(0),
     manualTimeoutAction: Schema.union([
       Schema.const('accept').description('同意'),
@@ -82,6 +84,6 @@ export function apply(ctx: Context, config: Config = {}) {
   new OnebotRequest(ctx, logger, config).registerEventListeners()
   // 注册其他通知
   new OneBotListener(ctx, logger, config).registerEventListeners()
-  const qgroup = ctx.command('qgroup', 'QQ 群管').usage('群管相关功能，需要管理权限')
+  const qgroup = ctx.command('qgroup', 'QQ 群管').usage('群管相关功能（需要管理权限）')
   registerCommands(qgroup, logger, utils, config.commandWhitelist || [])
 }

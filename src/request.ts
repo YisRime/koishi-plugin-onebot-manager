@@ -127,6 +127,7 @@ export class OnebotRequest {
    * 处理收到的请求
    */
   public async processRequest(session: Session, type: RequestType): Promise<void> {
+    if (this.config.enableDebug) this.logger.info(`原始事件: type=${type}, data=${JSON.stringify(session.event?._data)}`);
     const requestKey = type === 'friend' ? `friend:${session.userId}` : type === 'guild' ? `guild:${session.guildId}` : `member:${session.userId}:${session.guildId}`;
     this.cleanupActiveRequest(requestKey);
     try {
@@ -155,12 +156,15 @@ export class OnebotRequest {
         const { MemberRequestAutoRules = [] } = this.config;
         const rule = MemberRequestAutoRules.find(r => r.guildId === session.guildId);
         if (!rule) return false;
+        if (this.config.enableDebug) this.logger.info(`加群规则匹配: rule=${JSON.stringify(rule)}`);
         const hasKeywordRule = !!rule.keyword;
         const hasLevelRule = (rule.minLevel ?? -1) >= 0;
         if (!hasKeywordRule && !hasLevelRule) return false;
         if (hasKeywordRule) {
           try {
-            if (!new RegExp(rule.keyword).test(validationMessage)) return false;
+            const match = new RegExp(rule.keyword).test(validationMessage);
+            if (this.config.enableDebug) this.logger.info(`关键词规则检查: result=${match}, expression='${rule.keyword}', input='${validationMessage}'`);
+            if (!match) return false;
           } catch (e) {
             return false;
           }
@@ -168,7 +172,9 @@ export class OnebotRequest {
         if (hasLevelRule) {
           try {
             const userInfo = await session.onebot.getStrangerInfo(session.userId, false) as OneBotUserInfo;
-            if (userInfo.level < rule.minLevel) return `QQ 等级低于${rule.minLevel}级`;
+            const levelMatch = userInfo.level >= rule.minLevel;
+            if (this.config.enableDebug) this.logger.info(`等级规则检查: result=${levelMatch}, required=${rule.minLevel}, actual=${userInfo.level}`);
+            if (!levelMatch) return `QQ 等级低于${rule.minLevel}级`;
           } catch (error) {
             return false;
           }
@@ -179,7 +185,9 @@ export class OnebotRequest {
         const { FriendRequestAutoRegex, FriendLevel = -1 } = this.config;
         if (FriendRequestAutoRegex) {
           try {
-            if (new RegExp(FriendRequestAutoRegex).test(validationMessage)) return true;
+            const match = new RegExp(FriendRequestAutoRegex).test(validationMessage);
+            if (this.config.enableDebug) this.logger.info(`好友正则检查: result=${match}, expression='${FriendRequestAutoRegex}', input='${validationMessage}'`);
+            if (match) return true;
           } catch (e) {
             this.logger.warn(`好友申请正则无效: ${FriendRequestAutoRegex}`);
           }
@@ -187,23 +195,37 @@ export class OnebotRequest {
         if (FriendLevel < 0) return false;
         try {
           const userInfo = await session.onebot.getStrangerInfo(session.userId, false) as OneBotUserInfo;
-          return userInfo.level >= FriendLevel ? true : `QQ 等级低于${FriendLevel}级`;
+          const levelMatch = userInfo.level >= FriendLevel;
+          if (this.config.enableDebug) this.logger.info(`好友等级检查: result=${levelMatch}, required=${FriendLevel}, actual=${userInfo.level}`);
+          return levelMatch ? true : `QQ 等级低于${FriendLevel}级`;
         } catch (error) {
           return false;
         }
       }
       case 'guild': {
         const { GuildAllowUsers = [], GuildMinMemberCount = -1, GuildMaxCapacity = -1 } = this.config;
-        if (GuildAllowUsers.includes(session.userId)) return true;
+        if (GuildAllowUsers.includes(session.userId)) {
+          if (this.config.enableDebug) this.logger.info(`群邀请白名单检查: result=true, user=${session.userId}`);
+          return true;
+        }
         try {
           const user = await this.ctx.database.getUser(session.platform, session.userId);
-          if (user?.authority > 1) return true;
+          if (user?.authority > 1) {
+             if (this.config.enableDebug) this.logger.info(`群邀请权限检查: result=true, user=${session.userId}, authority=${user.authority}`);
+             return true;
+          }
         } catch {}
         if (GuildMinMemberCount < 0 && GuildMaxCapacity < 0) return false;
         try {
           const info = await session.onebot.getGroupInfo(session.guildId, true) as OneBotGroupInfo;
-          if (GuildMinMemberCount >= 0 && info.member_count < GuildMinMemberCount) return `群成员数量不足${GuildMinMemberCount}人`;
-          if (GuildMaxCapacity >= 0 && info.max_member_count < GuildMaxCapacity) return `群最大容量不足${GuildMaxCapacity}人`;
+          if (GuildMinMemberCount >= 0 && info.member_count < GuildMinMemberCount) {
+            if (this.config.enableDebug) this.logger.info(`群成员数检查: result=false, required=${GuildMinMemberCount}, actual=${info.member_count}`);
+            return `群成员数量不足${GuildMinMemberCount}人`;
+          }
+          if (GuildMaxCapacity >= 0 && info.max_member_count < GuildMaxCapacity) {
+            if (this.config.enableDebug) this.logger.info(`群容量检查: result=false, required=${GuildMaxCapacity}, actual=${info.max_member_count}`);
+            return `群最大容量不足${GuildMaxCapacity}人`;
+          }
           return true;
         } catch (error) {
           return false;

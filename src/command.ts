@@ -99,7 +99,7 @@ export function registerCommands(qgroup: Command, logger: Logger, utils: any, co
 
         const actionFn = async () => {
           await session.onebot.setGroupSpecialTitle(groupId, Number(targetId), title);
-          return `已${title ? '将' : '清除'}${targetId === session.userId ? '您' : `用户 ${targetId}`} 的头衔${title ? `设置为：${title}` : ''}`;
+          return `已${title ? '将' : '清除'}${targetId === session.userId ? '您' : `用户 ${targetId} `}的头衔${title ? `设置为：${title}` : ''}`;
         };
 
         return utils.withRoleCheck(session, groupId, logger, requiredBotRoles, requiredUserRoles, commandWhitelist, actionFn)();
