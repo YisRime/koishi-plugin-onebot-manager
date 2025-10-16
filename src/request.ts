@@ -16,7 +16,7 @@ export interface OneBotUserInfo {
   /** 用户 ID */
   user_id: number
   /** QQ等级 */
-  level?: number
+  qqLevel?: number
 }
 
 /**
@@ -82,7 +82,7 @@ export class OnebotRequest {
     if (!notifyTarget) return;
     const [targetType, targetId] = notifyTarget.split(':');
     if (!targetId || (targetType !== 'guild' && targetType !== 'private')) {
-      this.logger.warn(`通知目标错误: ${notifyTarget}`);
+      this.logger.warn(`通知目标错误: ${this.config.notifyTarget}`);
       return;
     }
     try {
@@ -171,11 +171,12 @@ export class OnebotRequest {
         }
         if (hasLevelRule) {
           try {
-            const userInfo = await session.onebot.getStrangerInfo(session.userId, false) as OneBotUserInfo;
-            const levelMatch = userInfo.level >= rule.minLevel;
-            if (this.config.enableDebug) this.logger.info(`等级规则检查: result=${levelMatch}, required=${rule.minLevel}, actual=${userInfo.level}`);
+            const userInfo = await session.onebot.getStrangerInfo(session.userId, true) as OneBotUserInfo;
+            const levelMatch = userInfo.qqLevel >= rule.minLevel;
+            if (this.config.enableDebug) this.logger.info(`等级规则检查: result=${levelMatch}, required=${rule.minLevel}, actual=${userInfo.qqLevel}`);
             if (!levelMatch) return `QQ 等级低于${rule.minLevel}级`;
           } catch (error) {
+            this.logger.error('获取陌生人信息失败:', error);
             return false;
           }
         }
@@ -194,11 +195,12 @@ export class OnebotRequest {
         }
         if (FriendLevel < 0) return false;
         try {
-          const userInfo = await session.onebot.getStrangerInfo(session.userId, false) as OneBotUserInfo;
-          const levelMatch = userInfo.level >= FriendLevel;
-          if (this.config.enableDebug) this.logger.info(`好友等级检查: result=${levelMatch}, required=${FriendLevel}, actual=${userInfo.level}`);
+          const userInfo = await session.onebot.getStrangerInfo(session.userId, true) as OneBotUserInfo;
+          const levelMatch = userInfo.qqLevel >= FriendLevel;
+          if (this.config.enableDebug) this.logger.info(`好友等级检查: result=${levelMatch}, required=${FriendLevel}, actual=${userInfo.qqLevel}`);
           return levelMatch ? true : `QQ 等级低于${FriendLevel}级`;
         } catch (error) {
+          this.logger.error('获取陌生人信息失败:', error);
           return false;
         }
       }
